@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}Search for {{ game.official_title }}{% endblock %}
+
+{% block content %}
+<h1>Manual Search: <span class="highlight">{{ game.official_title }}</span></h1>
+
+<div class="card">
+    <form method="post" class="search-form">
+        <label for="search_term">Search Term</label>
+        <input type="text" name="search_term" id="search_term" value="{{ search_term }}" class="form-control">
+
+        <button type="submit" class="btn btn-blue">Search Again</button>
+    </form>
+</div>
+
+<!-- This is the new card grid container -->
+<div class="search-results-grid">
+    {% for result in results %}
+        <div class="game-card">
+            <div class="game-details">
+                <h4 style="margin-bottom: 1rem;">{{ result.title }}</h4>
+                
+        
+                <div class="metadata-pills">
+                    <span class="pill"><span class="material-symbols-outlined">dns</span>{{ result.indexer }}</span>
+                    <!-- The "Grabs/Star" pill has been removed -->
+                    <span class="pill"><span class="material-symbols-outlined">arrow_upward</span>{{ "N/A" if result.seeders == -1 else result.seeders }}</span>
+                    <span class="pill"><span class="material-symbols-outlined">arrow_downward</span>{{ "N/A" if result.leechers == -1 else result.leechers }}</span>
+                    <span class="pill"><span class="material-symbols-outlined">save</span>{{ result.size }}</span>
+                </div>
+                
+                
+
+                <form action="{{ url_for('main.download') }}" method="post" class="download-form">
+                    <input type="hidden" name="magnet_link" value="{{ result.link }}">
+                    <input type="hidden" name="game_id" value="{{ game.id }}">
+                    <button type="submit" class="btn btn-download">Download</button>
+                </form>
+            </div>
+        </div>
+    {% else %}
+        <div class="card">
+            <p>No results found for this search term. Try being more specific or using a different term.</p>
+        </div>
+    {% endfor %}
+</div>
+{% endblock %}

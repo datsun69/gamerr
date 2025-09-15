@@ -1,0 +1,266 @@
+{% extends "base.html" %}
+
+{% block title %}Add Game - Gamerr{% endblock %}
+
+{% block content %}
+    <h1>Add New Game</h1>
+    
+    <!-- Section 1: Search by Title -->
+    <div class="content-card">
+        
+            <h2>Search by Title</h2>
+            <p>Find a game by searching the IGDB database.</p>
+            <form action="{{ url_for('main.add_game_search') }}" method="post">
+                <label for="game_title">Game Title</label>
+                <input type="text" name="game_title" id="game_title" class="form-control" required>            
+
+                <button type="submit" class="btn btn-blue">Search IGDB</button>
+            </form>
+
+    </div>
+
+    <!-- Section 2: Import from Folder (NEW) -->
+    <details class="content-card">
+        <!-- This is the updated summary section -->
+        <summary class="collapsible-header">
+            <h2>Import from Library Folder</h2>
+            <span class="material-symbols-outlined collapsible-icon">
+                keyboard_arrow_down
+            </span>
+        </summary>
+        <div class="details-content">
+            <p>Scan your game library folder for existing games that are not yet managed by Gamerr.</p>
+            <button id="scan-library-btn" class="btn btn-secondary">Scan Library</button>
+            
+            <div id="loading-spinner" class="mt-20" style="display: none;">
+                <p>Scanning and matching... this may take a moment.</p>
+                <div class="spinner"></div>
+            </div>
+
+            <div id="import-results" class="mt-20">
+                <!-- JavaScript will populate this area with the scan results -->
+            </div>
+        </div>
+    </details>
+
+    {% if discover %}
+    <details class="content-card">
+        <summary class="collapsible-header">
+            <h2>Discover: Top Reviewed</h2>
+            <span class="material-symbols-outlined collapsible-icon">keyboard_arrow_down</span>
+        </summary>
+        <div class="details-content discover-grid">
+            {% for game in discover.get('top_reviewed', []) %}
+                <div class="game-card">
+                    {% if game.cover and game.cover.url %}
+                        <img src="{{ game.cover.url.replace('t_thumb', 't_cover_big') }}" alt="{{ game.name }} Cover" class="game-cover-discover">
+                    {% else %}
+                        <img src="https://via.placeholder.com/150x200.png?text=No+Cover" alt="No Cover Available">
+                    {% endif %}                    
+
+                    <div class="game-meta status-badge status-cracked">
+                        {% if game.aggregated_rating %}
+                                <span class="material-symbols-outlined">star</span>
+                                <span>{{ "%.0f"|format(game.aggregated_rating) }}</span>
+                        {% endif %}
+                    </div>
+
+                    <div class="game-details">
+                        <a href="https://www.igdb.com/games/{{ game.slug }}" target="_blank" rel="noopener noreferrer">
+                            <h4>{{ game.name }}</h4>
+                        </a>
+
+                        <div class="game-buttons">
+                            <form action="{{ url_for('main.add_game_confirm') }}" method="post" class="game-card-form">
+                                <input type="hidden" name="igdb_id" value="{{ game.id }}">
+                                <input type="hidden" name="official_title" value="{{ game.name }}">
+                                {% if game.cover and game.cover.url %}<input type="hidden" name="cover_url" value="{{ game.cover.url.replace('t_thumb', 't_cover_big') }}">{% endif %}
+                                <input type="hidden" name="release_timestamp" value="{{ game.first_release_date }}">
+                                <button type="submit" class="btn btn-sm">Add</button>
+                                
+                            </form>
+                            <a href="https://www.igdb.com/games/{{ game.slug }}" target="_blank" class="btn btn-sm btn-pink"><span class="material-symbols-outlined">open_in_new</span></a>
+                        </div>
+                    </div>
+                </div>
+            {% else %}
+                <p>This list is currently empty. Run the update task to populate it.</p>
+            {% endfor %}
+        </div>
+    </details>
+    {% endif %}
+
+    {% if discover %}
+    <details class="content-card">
+        <summary class="collapsible-header">
+            <h2>Discover: Coming soon</h2>
+            <span class="material-symbols-outlined collapsible-icon">keyboard_arrow_down</span>
+        </summary>
+        <div class="details-content discover-grid">
+            {% for game in discover.get('coming_soon', []) %}
+                <div class="game-card">
+                    {% if game.cover and game.cover.url %}
+                        <img src="{{ game.cover.url.replace('t_thumb', 't_cover_big') }}" alt="{{ game.name }} Cover" class="game-cover-discover">
+                    {% else %}
+                        <img src="https://via.placeholder.com/150x200.png?text=No+Cover" alt="No Cover Available">
+                    {% endif %}                    
+
+                    <div class="game-details">
+                        <!-- The title is also a link for easy clicking -->
+                        <a href="https://www.igdb.com/games/{{ game.slug }}" target="_blank" rel="noopener noreferrer">
+                            <h4>{{ game.name }}</h4>
+                        </a>
+                        
+                        <div class="game-buttons">
+                            <form action="{{ url_for('main.add_game_confirm') }}" method="post" class="game-card-form">
+                                <input type="hidden" name="igdb_id" value="{{ game.id }}">
+                                <input type="hidden" name="official_title" value="{{ game.name }}">
+                                {% if game.cover and game.cover.url %}<input type="hidden" name="cover_url" value="{{ game.cover.url.replace('t_thumb', 't_cover_big') }}">{% endif %}
+                                <input type="hidden" name="release_timestamp" value="{{ game.first_release_date }}">
+                                <button type="submit" class="btn btn-sm">Add</button>
+                                
+                            </form>
+                            <a href="https://www.igdb.com/games/{{ game.slug }}" target="_blank" class="btn btn-sm btn-pink"><span class="material-symbols-outlined">open_in_new</span></a>
+                        </div>
+                    </div>
+                </div>
+            {% else %}
+                <p>This list is currently empty. Run the update task to populate it.</p>
+            {% endfor %}
+        </div>
+    </details>
+    {% endif %}
+
+
+<!-- We will add the JavaScript at the end of the content block -->
+<script>
+const scanBtn = document.getElementById('scan-library-btn');
+const resultsDiv = document.getElementById('import-results');
+const spinner = document.getElementById('loading-spinner');
+
+scanBtn.addEventListener('click', async () => {
+    // Show spinner and clear previous results
+    spinner.style.display = 'block';
+    resultsDiv.innerHTML = '';
+    scanBtn.disabled = true;
+
+    try {
+        const response = await fetch("{{ url_for('main.library_scan') }}", {
+            method: 'POST'
+        });
+        const scanResults = await response.json();
+
+        // Hide spinner
+        spinner.style.display = 'none';
+        scanBtn.disabled = false;
+
+        if (scanResults.length === 0) {
+            resultsDiv.innerHTML = '<p>No new game folders found in your library.</p>';
+            return;
+        }
+
+        // Build the results table
+        let tableHTML = `
+            <table class="results-table">
+                <thead>
+                    <tr>
+                        <th>Folder Name</th>
+                        <th>Best IGDB Match</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+        
+        scanResults.forEach((item, index) => {
+            tableHTML += `
+                <tr>
+                    <td>${item.folder_name}</td>
+                    <td>
+                        <select id="match-select-${index}" class="form-control">
+            `;
+            if (item.igdb_matches.length > 0) {
+                item.igdb_matches.forEach(match => {
+                    // We store all the data we need in the option's value attribute
+                    const matchData = JSON.stringify({
+                        id: match.id,
+                        title: match.name,
+                        cover: match.cover_url,
+                        date: match.release_timestamp
+                    });
+                    tableHTML += `<option value='${matchData}'>${match.name}</option>`;
+                });
+            } else {
+                tableHTML += `<option value="">No matches found</option>`;
+            }
+            tableHTML += `
+                        </select>
+                    </td>
+                    <td>
+                        <button class="btn btn-pink import-btn" 
+                                data-index="${index}" 
+                                data-folder="${item.folder_name}"
+                                ${item.igdb_matches.length === 0 ? 'disabled' : ''}>
+                            Import
+                        </button>
+                    </td>
+                </tr>
+            `;
+        });
+
+        tableHTML += `</tbody></table>`;
+        resultsDiv.innerHTML = tableHTML;
+
+    } catch (error) {
+        spinner.style.display = 'none';
+        scanBtn.disabled = false;
+        resultsDiv.innerHTML = '<p class="error">An error occurred while scanning.</p>';
+        console.error('Scan failed:', error);
+    }
+});
+
+// Event delegation for the import buttons
+resultsDiv.addEventListener('click', async (event) => {
+    if (event.target.classList.contains('import-btn')) {
+        const button = event.target;
+        const index = button.dataset.index;
+        const folderName = button.dataset.folder;
+        
+        const select = document.getElementById(`match-select-${index}`);
+        const selectedMatchData = JSON.parse(select.value);
+
+        // Disable button to prevent double-clicks
+        button.disabled = true;
+        button.textContent = 'Importing...';
+
+        try {
+            const importResponse = await fetch("{{ url_for('main.library_import_confirm') }}", {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    folder_name: folderName,
+                    igdb_id: selectedMatchData.id,
+                    official_title: selectedMatchData.title,
+                    cover_url: selectedMatchData.cover,
+                    release_timestamp: selectedMatchData.date
+                })
+            });
+            
+            if (importResponse.ok) {
+                // Success! Remove the row from the table
+                button.closest('tr').remove();
+            } else {
+                // Handle error
+                button.textContent = 'Error!';
+                button.classList.remove('btn-pink');
+                button.classList.add('btn-danger');
+            }
+
+        } catch (error) {
+            console.error('Import failed:', error);
+            button.textContent = 'Error!';
+        }
+    }
+});
+</script>
+{% endblock %}

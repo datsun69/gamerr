@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+
+{% block title %}Library - Gamerr{% endblock %}
+
+{% block content %}
+<ul class="game-list">
+    {% for game in games %}
+        <li class="game-card" data-id="{{ game.id }}" data-status="{{ game.status }}">
+            
+            {% if game.cover_url %}
+                <img src="https:{{ game.cover_url }}" alt="Cover for {{ game.official_title }}" class="game-cover">
+            {% endif %}
+            <span class="game-meta status-badge game-status
+                {% if 'definitely cracked' in game.status.lower() %}status-cracked
+                {% elif 'probably cracked' in game.status.lower() %}status-p2p
+                {% else %}status-{{ game.status.lower() }}
+                {% endif %}"
+                {% if game.release_name %}title="Evidence: {{ game.release_name }}"{% endif %}>
+                {{ game.status|replace("Definitely Cracked", "Cracked (scene)")|replace("Probably Cracked (P2P)", "Cracked (P2P)")}}
+            </span>            
+            <div class="game-details">
+                <h3>{{ game.official_title }}</h3>
+                
+                
+
+                
+                <small>
+                    <strong>Date:</strong> {{ game.release_date or 'N/A' }}<br>
+                    <!-- THE FIX: We added a 'game-release-name' class to this span -->
+                    <strong>Release:</strong> <span class="game-release-name">{{ game['release_name'] or 'Awaiting Release Info' }}</span><br>
+                    <strong>Group:</strong> {{ game['release_group'] or 'N/A' }} <br><br>
+                    
+                    {% if game['nfo_img_path'] %}<a href="{{ url_for('main.serve_nfo_file', filename=game['nfo_img_path']) }}" target="_blank">View NFO</a>
+                    {% else %}{% endif %}
+                </small>
+
+                <div class="game-actions">
+                    {% if game.status and ('Cracked' in game.status or 'Downloaded' in game.status) %}
+                        <a href="{{ url_for('main.interactive_search', game_id=game.id) }}" class="btn btn-blue btn-sm">
+                            <span class="material-symbols-outlined">search</span>
+                        </a>
+                    {% endif %}
+                    
+
+                    {% if game.slug %}
+                    <a href="https://www.igdb.com/games/{{ game.slug }}" target="_blank" rel="noopener noreferrer" class="btn btn-lime btn-sm">
+                        <span class="material-symbols-outlined">open_in_new</span>
+                    </a>
+                    {% endif %}
+
+                    <form action="{{ url_for('main.delete_game', game_id=game.id) }}" method="post">
+                        <button type="submit" class="btn btn-red btn-sm" onclick="return confirm('Are you sure?');">
+                            <span class="material-symbols-outlined">delete</span>
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </li>
+    {% else %}
+        <li class="game-card">No games are being monitored yet. Add one to get started!</li>
+    {% endfor %}
+</ul>
+{% endblock %}
+
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const monitoredGames = document.querySelectorAll('.game-card[data-status="Monitoring"]');
+
+        const statusClassMap = {
+            'definitely cracked': 'status-cracked',
+            'probably cracked (p2p)': 'status-p2p',
+            'monitoring': 'status-monitoring',
+            'downloading': 'status-downloading',
+            'downloaded': 'status-downloaded',
+            'snatched': 'status-snatched',
+            'imported': 'status-imported'
+        };
+        const allStatusClasses = Object.values(statusClassMap);
+
+        if (monitoredGames.length > 0) {
+            const checkStatuses = () => {
+                monitoredGames.forEach(card => {
+                    const gameId = card.dataset.id;
+                    if (card.dataset.status === 'Monitoring') {
+                        fetch(`/game/status/${gameId}`)
+                            .then(response => response.json())
+                            .then(data => {
+                                if (data.status !== 'Monitoring') {
+                                    const statusElement = card.querySelector('.game-status');
+                                    
+                                    if (statusElement) {
+                                        // --- FIX #1: FRIENDLY STATUS RENAMING ---
+                                        let displayStatus = data.status
+                                            .replace("Definitely Cracked", "Cracked (scene)")
+                                            .replace("Probably Cracked (P2P)", "Cracked (P2P)");
+                                        statusElement.textContent = displayStatus;
+                                        // ------------------------------------
+
+                                        statusElement.classList.remove(...allStatusClasses);
+                                        const newStatusClass = statusClassMap[data.status.toLowerCase()];
+                                        if (newStatusClass) {
+                                            statusElement.classList.add(newStatusClass);
+                                        }
+                                    }
+
+                                    const releaseNameElement = card.querySelector('.game-release-name');
+                                    if (releaseNameElement && data.release_name) {
+                                        releaseNameElement.textContent = data.release_name;
+                                    }
+
+                                    const actionsContainer = card.querySelector('.game-actions');
+                                    if (actionsContainer) {
+                                        const deleteFormHTML = actionsContainer.querySelector('form').outerHTML;
+                                        
+                                        // --- FIX #2: BUILD AND ADD THE IGDB LINK ---
+                                        let igdbLinkHTML = '';
+                                        if (data.slug) {
+                                            igdbLinkHTML = `
+                                                <a href="https://www.igdb.com/games/${data.slug}" target="_blank" rel="noopener noreferrer" class="btn btn-lime btn-sm" title="Open IGDB Page">
+                                                    <span class="material-symbols-outlined">open_in_new</span>
+                                                </a>
+                                            `;
+                                        }
+                                        // ------------------------------------------
+                                        
+                                        actionsContainer.innerHTML = `
+                                            <a href="/search/${gameId}" class="btn btn-blue btn-sm" title="Search Manually">
+                                                <span class="material-symbols-outlined">search</span>
+                                            </a>
+                                            ${igdbLinkHTML}
+                                            ${deleteFormHTML}
+                                        `;
+                                    }
+                                    card.dataset.status = data.status;
+                                }
+                            });
+                    }
+                });
+            };
+            setInterval(checkStatuses, 5000);
+        }
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - Gamerr{% endblock %}
+
+{% block content %}
+
+        <h2>Settings</h2>
+
+        <form action="{{ url_for('main.save_settings') }}" method="post" class="settings-form">
+            
+
+            <details class="content-card">
+                <summary class="collapsible-header">
+                    <div>
+                    <h2>IGDB / Twitch API</h2>
+                    <p>Required for searching for games and fetching metadata.</p>
+                    </div>
+                    <span class="material-symbols-outlined collapsible-icon">keyboard_arrow_down</span>
+                </summary>
+                <div class="details-content">
+                    <label for="twitch_client_id">Twitch Client ID</label><br>
+                    <input type="text" id="twitch_client_id" name="twitch_client_id" value="{{ settings.twitch_client_id }}" size="50"><br><br>
+                    <label for="twitch_client_secret">Twitch Client Secret</label><br>
+                    <input type="password" id="twitch_client_secret" name="twitch_client_secret" value="{{ settings.twitch_client_secret }}" size="50">
+                </div>
+            </details>
+
+            <details class="content-card">
+                <summary class="collapsible-header">
+                    <div>
+                    <h2>Reddit API</h2>
+                    <p>Used for finding P2P releases from curated daily posts.</p>
+                    </div>
+                    <span class="material-symbols-outlined collapsible-icon">keyboard_arrow_down</span>
+                </summary>
+                <div class="details-content">
+                    <label for="reddit_client_id">Reddit Client ID</label><br>
+                    <input type="text" id="reddit_client_id" name="reddit_client_id" value="{{ settings.reddit_client_id }}" size="50"><br><br>
+                    <label for="reddit_client_secret">Reddit Client Secret</label><br>
+                    <input type="password" id="reddit_client_secret" name="reddit_client_secret" value="{{ settings.reddit_client_secret }}" size="50"><br><br>
+                    
+                    <label for="reddit_username">Your Reddit Username</label><br>
+                    <input type="text" id="reddit_username" name="reddit_username" value="{{ settings.reddit_username }}" size="50"><br><br>
+                    
+                    <label for="reddit_password">Your Reddit Password</label><br>
+                    <input type="password" id="reddit_password" name="reddit_password" value="{{ settings.reddit_password }}" size="50">
+                </div>
+            </details>
+
+            <details class="content-card">
+                <summary class="collapsible-header">
+                    <div>
+                    <h2>Jackett</h2>
+                    <p>Used for searching for releases on your indexers.</p>
+                    </div>
+                    <span class="material-symbols-outlined collapsible-icon">keyboard_arrow_down</span>
+                </summary>
+                <div class="details-content">
+                    <label for="jackett_url">Jackett URL (e.g., http://localhost:9117)</label><br>
+                    <input type="text" id="jackett_url" name="jackett_url" value="{{ settings.jackett_url }}" size="50"><br><br>
+                
+                    <label for="jackett_api_key">Jackett API Key</label><br>
+                    <input type="text" id="jackett_api_key" name="jackett_api_key" value="{{ settings.jackett_api_key }}" size="50"><br><br>
+                
+                    <label for="jackett_indexers">Indexer IDs (comma-separated, e.g., torrentleech,rutracker or just 'all')</label><br>
+                    <input type="text" id="jackett_indexers" name="jackett_indexers" value="{{ settings.jackett_indexers }}" size="50">
+                </div>
+            </details>
+
+            <details class="content-card">
+                <summary class="collapsible-header">
+                    <div>
+                    <h2>qBittorrent</h2>
+                    <p>Your download client.</p>
+                    </div>
+                    <span class="material-symbols-outlined collapsible-icon">keyboard_arrow_down</span>
+                </summary>
+                <div class="details-content">
+                    <label for="qbittorrent_host">Host (e.g., localhost)</label><br>
+                    <input type="text" id="qbittorrent_host" name="qbittorrent_host" value="{{ settings.qbittorrent_host }}" size="50"><br><br>
+                    
+                    <label for="qbittorrent_port">Port (e.g., 8080)</label><br>
+                    <input type="text" id="qbittorrent_port" name="qbittorrent_port" value="{{ settings.qbittorrent_port }}" size="50"><br><br>
+                
+                    <label for="qbittorrent_user">Username</label><br>
+                    <input type="text" id="qbittorrent_user" name="qbittorrent_user" value="{{ settings.qbittorrent_user }}" size="50"><br><br>
+                
+                    <label for="qbittorrent_pass">Password</label><br>
+                    <input type="password" id="qbittorrent_pass" name="qbittorrent_pass" value="{{ settings.qbittorrent_pass }}" size="50"><br><br>
+                
+                    <label for="qbittorrent_category">Category (for save path management)</label><br>
+                    <input type="text" id="qbittorrent_category" name="qbittorrent_category" value="{{ settings.qbittorrent_category }}" size="50">
+                </div>
+            </details>
+
+            <button type="submit" class="btn btn-blue">Save Settings</button>
+        </form>
+        {% endblock %}

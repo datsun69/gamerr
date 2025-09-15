@@ -1,0 +1,381 @@
+/* static/style.css */
+
+/* --- 1. Root Variables & Font --- */
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&display=swap');
+
+:root {
+    /* -- Palette -- */
+    --color-background-primary: #0D0D1A;
+    --color-background-secondary: #1A1A2E;
+    --color-text-primary: #E0E0E0;
+    --color-white: #FFFFFF;
+    --color-black: #000000;
+    --color-border-primary: #FF1493;
+
+    /* -- Brand & Accents -- */
+    --color-accent-blue: #00BFFF;
+    --color-accent-blue-glow: rgba(0, 191, 255, 0.5);
+    --color-accent-purple: #9400D3;
+    --color-accent-purple-glow: rgba(148, 0, 211, 0.6);
+    --color-accent-pink: #FF1493;
+    --color-accent-pink-glow: rgba(255, 20, 147, 0.6);
+    --color-accent-gold: #FFD700;
+    --color-accent-gold-glow: rgba(255, 215, 0, 0.7);
+    --color-accent-red: #FF4500;
+    --color-accent-red-glow: rgba(255, 69, 0, 0.6);
+    --color-accent-lime: #7FFF00;
+    --color-accent-lime-glow: rgba(127, 255, 0, 0.6);
+
+    /* -- Status Badges -- */
+    --color-status-monitoring: #00BFFF;
+    --color-status-cracked: #FFD700;
+    --color-status-p2p: #FF69B4;
+    --color-status-downloading: #7FFF00;
+    --color-status-downloaded: #9370DB;
+    --color-status-snatched: #00FA9A;
+    --color-status-imported: #32CD32;
+
+    /* -- Greys for UI elements -- */
+    --color-grey-dark: #444;
+    --color-grey-border: #666;
+}
+
+/* --- 2. Base & Typography --- */
+*, *::before, *::after {
+    box-sizing: border-box;
+}
+
+body {
+    font-family: "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+    background-color: var(--color-background-primary);
+    color: var(--color-text-primary);
+    font-size: 14px;
+    margin: 0;
+    padding: 0;
+    background-image: linear-gradient(rgba(13, 13, 26, 0.95), rgba(13, 13, 26, 0.95)), url('https://www.transparenttextures.com/patterns/carbon-fibre.png');
+}
+
+h1, h2, h3, h4 {
+    font-weight: 700;
+    text-shadow: 0 0 5px rgba(255, 255, 255, 0.1);
+    margin-top: 0
+}
+
+a {
+    color: var(--color-accent-blue);
+    font-weight: 600;
+    text-decoration: none;
+    transition: color 0.2s ease, text-shadow 0.2s ease;
+}
+
+a:hover {
+    color: var(--color-white);
+    text-decoration: none;
+    text-shadow: 0 0 8px var(--color-accent-blue-glow);
+}
+
+small {
+    font-size: 12px;
+}
+
+/* --- 3. Layout & Main Container --- */
+.page-wrapper {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+.container {
+    max-width: 900px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 0;
+    flex: 1;
+}
+
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 2rem 0;
+}
+
+footer {
+    max-width: 900px;
+    margin: 2rem auto 2rem auto; /* Keep the auto margins for centering */
+    font-size: 0.8rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: var(--color-background-secondary);
+    border: 2px solid var(--color-border-primary);
+    border-radius: 8px;
+    padding: 1rem;
+    width: 100%; /* Add this */
+}
+
+/* --- 4. Button System --- */
+.btn {
+    display: inline-block;
+    color: var(--color-background-primary);
+    padding: 12px 24px;
+    border-radius: 4px;
+    font-weight: 800;
+    text-decoration: none;
+    text-transform: uppercase;
+    transition: all 0.2s ease-in-out;
+    cursor: pointer;
+    flex-grow: 0;
+    font-family: inherit;
+    font-size: 100%;
+    text-align: center;
+    border: 2px solid; /* Border color will be set by modifier */
+    background-color: transparent; /* Background color will be set by modifier */
+}
+
+/* Default Color: Blue */
+.btn, .btn-blue {
+    background-color: var(--color-accent-blue);
+    border-color: var(--color-accent-blue);
+    box-shadow: 0 0 8px var(--color-accent-blue-glow), inset 0 0 8px rgba(0, 0, 0, 0.3);
+}
+.btn:hover, .btn-blue:hover {
+    box-shadow: 0 0 15px var(--color-accent-blue-glow), 0 0 25px var(--color-accent-blue-glow), inset 0 0 8px rgba(0, 0, 0, 0.3);
+    color: var(--color-white);
+}
+
+/* Color Modifiers */
+.btn-red { background-color: var(--color-accent-red); border-color: var(--color-accent-red); box-shadow: 0 0 8px var(--color-accent-red-glow), inset 0 0 8px rgba(0,0,0,0.3); }
+.btn-red:hover { box-shadow: 0 0 15px var(--color-accent-red-glow), 0 0 25px var(--color-accent-red-glow), inset 0 0 8px rgba(0,0,0,0.3); color: var(--color-white); }
+
+.btn-purple { background-color: var(--color-accent-purple); border-color: var(--color-accent-purple); box-shadow: 0 0 8px var(--color-accent-purple-glow), inset 0 0 8px rgba(0,0,0,0.3); }
+.btn-purple:hover { box-shadow: 0 0 15px var(--color-accent-purple-glow), 0 0 25px var(--color-accent-purple-glow), inset 0 0 8px rgba(0,0,0,0.3); color: var(--color-white); }
+
+.btn-pink { background-color: var(--color-accent-pink); border-color: var(--color-accent-pink); box-shadow: 0 0 8px var(--color-accent-pink-glow), inset 0 0 8px rgba(0,0,0,0.3); }
+.btn-pink:hover { box-shadow: 0 0 15px var(--color-accent-pink-glow), 0 0 25px var(--color-accent-pink-glow), inset 0 0 8px rgba(0,0,0,0.3); color: var(--color-white); }
+
+.btn-lime { background-color: var(--color-accent-lime); border-color: var(--color-accent-lime); box-shadow: 0 0 8px var(--color-accent-lime-glow), inset 0 0 8px rgba(0,0,0,0.3); }
+.btn-lime:hover { box-shadow: 0 0 15px var(--color-accent-lime-glow), 0 0 25px var(--color-accent-lime-glow), inset 0 0 8px rgba(0,0,0,0.3); color: var(--color-white); }
+
+.btn-gold, .btn-active { background-color: var(--color-accent-gold); border-color: var(--color-accent-gold); box-shadow: 0 0 8px var(--color-accent-gold-glow), inset 0 0 8px rgba(0,0,0,0.3); color: var(--color-background-primary); }
+.btn-gold:hover, .btn-active:hover { box-shadow: 0 0 15px var(--color-accent-gold-glow), 0 0 25px var(--color-accent-gold-glow), inset 0 0 8px rgba(0,0,0,0.3); color: var(--color-background-primary); }
+
+.btn:active {
+    transform: scale(1.0);
+    box-shadow: 0 0 5px var(--accent-glow), inset 0 0 10px rgba(0, 0, 0, 0.5);
+}
+
+.btn-sm { padding: 6px 12px; }
+.btn span { font-size: 20px; }
+
+
+/* --- 5. Card Styles --- */
+.game-list {
+    list-style-type: none;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 20px;
+}
+
+.card, .content-card, .game-card {
+    background-color: var(--color-background-secondary);
+    border: 2px solid var(--color-border-primary);
+    border-radius: 8px;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+    overflow: hidden;
+}
+
+/* Overwrite padding for game-card which handles it internally */
+.game-card {
+    padding: 0;
+}
+
+.content-card {
+    margin-bottom: 2em;
+    width: 100%;
+}
+
+.card:hover, .content-card:hover, .game-card:hover {
+    border-color: var(--color-accent-blue);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.7), 0 0 20px var(--color-accent-blue-glow);
+}
+
+.game-cover {
+    width: 100%;
+    height: 260px;
+    object-fit: cover;
+    flex-shrink: 0;
+}
+
+.game-cover-discover {
+    width: 100%;
+    height: 250px;
+    object-fit: cover;
+    flex-shrink: 0;
+}
+
+.game-details {
+    width: 100%;
+    padding: 1rem 1rem 0.5rem 1rem;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+}
+
+.game-details h3, .game-details h4 {
+    margin: 0;
+    color: var(--color-white);
+}
+
+.game-details label { padding: 0.5rem 0; }
+.game-actions { margin-top: 1rem; margin-bottom: 0.5rem; display: flex; justify-content: space-between; }
+
+/* Card Hover Reveal Animation */
+.game-details p { margin-top: auto; margin-bottom: 0; padding-top: 0.5rem; }
+.game-details small, .game-details .game-buttons { opacity: 0; transform: scaleY(0); transform-origin: top; max-height: 0; pointer-events: none; transition: all 0.2s ease-in-out; }
+.game-card:hover .game-details small, .game-card:hover .game-details .game-buttons { opacity: 1; transform: scaleY(1); max-height: 100px; pointer-events: auto; }
+.game-card:hover .game-details small { margin-top: 0.5rem; }
+.game-card:hover .game-details .game-buttons { margin-bottom: 0.5rem; }
+
+.game-buttons {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    padding-top: 1rem;
+}
+
+/* --- 6. Status Badges --- */
+.status-badge {
+    display: inline-block;
+    padding: 6px 14px;
+    border-radius: 4px;
+    font-size: 0.9em;
+    font-weight: 700;
+    color: var(--color-background-primary);
+    text-transform: uppercase;
+    border: none;
+    text-shadow: none;
+}
+
+.status-monitoring { background-color: var(--color-status-monitoring); }
+.status-cracked { background-color: var(--color-status-cracked); }
+.status-p2p { background-color: var(--color-status-p2p); }
+.status-downloading { background-color: var(--color-status-downloading); color: var(--color-black); }
+.status-downloaded { background-color: var(--color-status-downloaded); }
+.status-snatched { background-color: var(--color-status-snatched); color: var(--color-black); }
+.status-imported { background-color: var(--color-status-imported); }
+
+
+/* --- 7. UI Components (Grids, Pills, Forms, etc.) --- */
+/* Collapsible Sections */
+.collapsible-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    list-style: none; /* Removes the default browser triangle */
+}
+.collapsible-header::-webkit-details-marker { display: none; }
+.collapsible-header h2 { margin: 0; }
+.details-content { padding-top: 1.5rem; }
+.collapsible-icon { transition: transform 0.2s ease-in-out; }
+details[open] > summary.collapsible-header .collapsible-icon { transform: rotate(180deg); }
+
+/* Tables */
+.results-table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+.results-table th, .results-table td { text-align: left; padding: 0.75rem; border-bottom: 1px solid var(--color-grey-border); }
+.results-table th { font-weight: 700; }
+
+/* Grids */
+.discover-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+.activity-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 1.5rem; }
+.search-results-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1.5rem; margin-top: 2rem; margin-bottom: 2rem; }
+
+/* Metadata & Pills */
+.game-meta { position: absolute; display: flex; align-items: center; margin: 6px; }
+.metadata-pills { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1.25rem; }
+.pill { background-color: var(--color-accent-gold); color: var(--color-background-primary); padding: 0.25rem 0.75rem; border-radius: 12px; font-size: 0.8rem; font-weight: 500; display: inline-flex; align-items: center; gap: 0.3rem; text-decoration: none; text-transform: capitalize; }
+.pill .material-symbols-outlined { font-size: 1rem; }
+
+/* Progress Bar */
+.progress-bar { width: 100%; height: 40px; background-color: var(--color-grey-dark); border-radius: 8px; overflow: hidden; margin-bottom: 1rem; border: 2px solid var(--color-border-primary); padding: 3px; }
+.progress-bar-inner { border-radius: 4px; height: 100%; background: var(--color-accent-blue); color: var(--color-white); font-weight: bold; font-size: 0.8rem; display: flex; align-items: center; justify-content: center; transition: width 0.3s ease-in-out; }
+.progress-bar-inner span { padding: 0 0.5rem; }
+
+/* Action Buttons (Activity Page) */
+.action-buttons { display: flex; gap: 0.75rem; }
+.download-form { margin-top: auto; /* Pushes button to bottom of card */ }
+
+/* Forms */
+form { display: flex; align-items: center; gap: 1rem; }
+input[type="text"], input[type="password"], select {
+    padding: 12px;
+    border: 2px solid var(--color-border-primary);
+    background-color: var(--color-background-primary);
+    color: var(--color-text-primary);
+    border-radius: 4px;
+    font-size: 1em;
+    font-family: inherit;
+    box-sizing: border-box;
+    box-shadow: none;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    width: 100%;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+}
+select {
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%2300BFFF' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    background-size: 16px 12px;
+    padding-right: 2.5rem;
+}
+input[type="text"]:focus, input[type="password"]:focus, select:focus {
+    outline: none;
+    border-color: var(--color-accent-blue);
+    box-shadow: 0 0 10px var(--color-accent-blue-glow);
+}
+button[type="submit"] { text-wrap: nowrap; }
+
+/* Form Layout Helpers */
+.settings-form { flex-direction: column; }
+.card-actions-form { display: flex; justify-content: space-between; width: 100%; padding: 1rem; }
+
+/* Spinner */
+.spinner { border: 4px solid rgba(0, 0, 0, 0.1); width: 36px; height: 36px; border-radius: 50%; border-left-color: var(--color-text-primary); animation: spin 1s ease infinite; }
+@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+/* --- 8. Utility Classes (for replacing inline styles) --- */
+.mt-20 { margin-top: 20px !important; }
+.mb-1 { margin-bottom: 1rem !important; }
+.ml-auto { margin-left: auto !important; }
+.no-padding { padding: 0 !important; }
+.no-margin { margin: 0 !important; }
+.metadata-pills-wide { flex-basis: 70% !important; }
+
+/* --- 9. Responsive Design --- */
+@media (max-width: 768px) {
+    body { padding: 1rem; }
+    header { flex-direction: column; gap: 1.5rem; align-items: start; }
+    .btn { padding: 6px 12px; }
+    .game-list { grid-template-columns: 1fr 1fr; gap: 10px; }
+    .game-cover { height: 260px; }
+    .game-details { padding: 0.5rem; }
+    .discover-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+
+    /* Force details to be visible on mobile */
+    .game-details small, .game-details .game-buttons {
+        opacity: 1;
+        transform: none;
+        max-height: none;
+        pointer-events: auto;
+    }
+    .game-buttons { margin-top: 0; padding-top: 1rem; }
+}

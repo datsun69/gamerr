@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual Environment
+venv/
+
+# Instance Folder (Secrets and DB)
+instance/
+nfo_storage/
+
+# Logs
+logs/
+
+# VS Code settings
+.vscode/
+
+# IDE files
+.idea/
+
+run.bat

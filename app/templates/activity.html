@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block title %}Activity - Gamerr{% endblock %}
+
+{% block content %}
+    <h1>Download Client Activity</h1>
+
+    <!-- This div will be the container for our new activity cards -->
+    <div id="activity-grid" class="activity-grid">
+        <!-- JavaScript will populate this area -->
+        <p>Loading activity...</p>
+        <div class="spinner"></div>
+    </div>
+{% endblock %}
+
+
+{% block scripts %}
+<script>
+    const activityGrid = document.getElementById('activity-grid');
+
+    // This function now builds a 'card' instead of a 'table row'
+    function renderCard(torrent) {
+        // Determine which action buttons to show based on the torrent's state
+        let actionButtons = '';
+        const stateLower = torrent.state.toLowerCase();
+
+        
+        // The main card structure
+        return `
+            <div class="game-card">
+                <div class="game-details">
+                    <h4 class="mb-1">${torrent.friendly_name}</h4>
+                    
+                    <div class="progress-bar">
+                        <div class="progress-bar-inner" style="width: ${torrent.progress};" title="${torrent.progress}">
+                            <span>${torrent.state}</span>
+                        </div>
+                    </div>
+
+
+
+                    <div class="action-buttons">
+                        <div class="metadata-pills metadata-pills-wide">
+                            <span class="pill"><span class="material-symbols-outlined">save</span>${torrent.size}</span>
+                            <span class="pill"><span class="material-symbols-outlined">swap_vert</span>${torrent.ratio}</span>
+                            <span class="pill"><span class="material-symbols-outlined">arrow_downward</span>${torrent.dlspeed}</span>
+                            <span class="pill"><span class="material-symbols-outlined">arrow_upward</span>${torrent.upspeed}</span>
+                            <!-- Only show seeding time if it's available -->
+                            ${torrent.seeding_time ? `<span class="pill"><span class="material-symbols-outlined">schedule</span>${torrent.seeding_time}</span>` : ''}
+                        </div>                        
+                        <form action="/activity/action" method="post" class="ml-auto" onsubmit="return confirm('DELETE TORRENT AND ALL DATA?');">
+                            <input type="hidden" name="hash" value="${torrent.hash}">
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="delete_files" value="true">
+                            <button type="submit" class="btn btn-red btn-sm">
+                                <span class="material-symbols-outlined">delete_forever</span>
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    async function updateActivity() {
+        try {
+            const response = await fetch('/activity/data');
+            const data = await response.json();
+            
+            if (data.error) {
+                activityGrid.innerHTML = `<div class="card"><p>Error fetching data: ${data.error}</p></div>`;
+                return;
+            }
+
+            if (data.torrents && data.torrents.length > 0) {
+                activityGrid.innerHTML = data.torrents.map(renderCard).join('');
+            } else {
+                activityGrid.innerHTML = '<div class="card"><p>No active torrents being tracked by Gamearr.</p></div>';
+            }
+        } catch (error) {
+            console.error("Failed to update activity:", error);
+            activityGrid.innerHTML = `<div class="card"><p>Failed to connect to Gamearr backend.</p></div>`;
+        }
+    }
+
+    const pollingInterval = setInterval(updateActivity, 30000000);
+    updateActivity();
+</script>
+{% endblock %}

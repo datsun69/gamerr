@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block title %}Search Results - Gamerr{% endblock %}
+
+{% block content %}
+    <h1 id="page-title">Searching...</h1>        
+    <div id="results-container">
+        <p>Please wait while we fetch results from IGDB.</p>
+        <div class="spinner"></div> <!-- Assuming you have a .spinner class in your CSS -->
+    </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const taskId = "{{ task_id }}";
+    const resultsContainer = document.getElementById('results-container');
+    const pageTitle = document.getElementById('page-title');
+
+    function timestampToDate(timestamp) {
+        if (!timestamp) return 'N/A';
+        return new Date(timestamp * 1000).toISOString().split('T')[0];
+    }
+
+    async function pollForResults() {
+        try {
+            const response = await fetch(`/add/results/data/${taskId}`);
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            const data = await response.json();
+
+            if (data.status === 'COMPLETE') {
+                clearInterval(pollingInterval);
+                renderResults(data.results);
+            } else if (data.status === 'FAILED' || data.status === 'NOT_FOUND') {
+                clearInterval(pollingInterval);
+                resultsContainer.innerHTML = '<div class="card"><p>Search failed or task was not found.</p></div>';
+            }
+        } catch (error) {
+            console.error("Polling failed:", error);
+            clearInterval(pollingInterval);
+            resultsContainer.innerHTML = '<div class="card"><p>An error occurred.</p></div>';
+        }
+    }
+
+    function renderResults(results) {
+        if (!results || results.length === 0) {
+            resultsContainer.innerHTML = '<div class="card"><p>No games found for your search term.</p></div>';
+            pageTitle.innerText = 'Search Results';
+            return;
+        }
+
+        let html = '<ul class="game-list">'; // Use a different class to avoid conflicts with index.html
+        results.forEach(game => {
+            const releaseDate = timestampToDate(game.release_timestamp);
+            const coverUrl = game.cover_url ? `https:${game.cover_url}` : `https://via.placeholder.com/150x200?text=No+Cover`;
+            
+            html += `
+            <li class="game-card">
+                <img src="${coverUrl}" class="game-cover" alt="Cover for ${game.name}">
+                    <div class="game-details">
+                        <h3>${game.name}</h3>
+
+                        <p class="no-padding no-margin">${releaseDate}</p>
+                    </div>
+                    <form action="{{ url_for('main.add_game_confirm') }}" method="post" class="card-actions-form">
+                        <input type="hidden" name="igdb_id" value="${game.id}">
+                        <input type="hidden" name="official_title" value="${game.name}">
+                        
+                        <!-- THIS IS THE CRITICAL FIX -->
+                        <input type="hidden" name="slug" value="${game.slug}">
+                        
+                        <input type="hidden" name="cover_url" value="${game.cover_url || ''}">
+                        <input type="hidden" name="release_timestamp" value="${game.release_timestamp || ''}">
+                        <button type="submit" class="btn btn-blue btn-sm"><span class="material-symbols-outlined">add</span></button>
+                        <a href="https://www.igdb.com/games/${game.slug}" target="_blank" rel="noopener noreferrer" class="btn btn-lime btn-sm">
+                            <span class="material-symbols-outlined">open_in_new</span>
+                        </a>
+                    </form>
+                </li>`;
+        });
+        html += '</ul>';
+        pageTitle.innerText = 'Search Results';
+        resultsContainer.innerHTML = html;
+    }
+
+    const pollingInterval = setInterval(pollForResults, 2000);
+    pollForResults();
+</script>
+{% endblock %}

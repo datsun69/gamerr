@@ -256,52 +256,52 @@ def add_to_qbittorrent(magnet_link):
 # P2P Source Checkers
 # =============================================
 
-def check_source_reddit(game_title): # <-- Notice 'settings' is gone from the arguments
+def check_source_reddit(game_title):
     """
-    Checks Reddit for a new release.
-    This function is now self-contained and fetches its own settings.
+    Checks recent Reddit posts for a new, full game release, ignoring updates and DLCs.
     """
     current_app.logger.info(f"    -> Checking Reddit for '{game_title}'...")
-    
-    # This is the ONLY new line inside the function
     settings = get_settings_dict()
     
-    try:
-        # The rest of your original code is IDENTICAL
-        if not all([settings.get('reddit_client_id'), ...]): # etc.
-            current_app.logger.warning("    -> Reddit credentials not configured. Skipping check.")
-            return None, None
+    if not all([settings.get('reddit_client_id'), settings.get('reddit_client_secret'), settings.get('reddit_username'), settings.get('reddit_password')]):
+        current_app.logger.warning("    -> Reddit credentials not configured. Skipping check.")
+        return None, None
         
+    try:
         reddit = praw.Reddit(
             client_id=settings.get('reddit_client_id'),
             client_secret=settings.get('reddit_client_secret'),
-            user_agent="Gamearr v1.0 (by u/YourUsername)", # A descriptive user agent is required
+            user_agent="Gamearr v1.1",
             username=settings.get('reddit_username'),
             password=settings.get('reddit_password')
         )
 
         redditor = reddit.redditor('EssenseOfMagic')
-        
-        for submission in redditor.submissions.new(limit=100):
-            if "Daily Releases" in submission.title:
-                pattern = re.compile(r"^\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|", re.MULTILINE)
-                matches = pattern.findall(submission.selftext)
-                
-                # --- THIS IS THE NEW, STRICTER LOGIC ---
-                # Prepare a set of keywords from our official game title
-                normalized_title = game_title.replace(':', '').lower()
-                title_keywords = set(normalized_title.split())
-                # --- END OF NEW LOGIC ---
+        normalized_title = game_title.replace(':', '').lower()
+        title_keywords = set(normalized_title.split())
+        BLOCKED_KEYWORDS = {'TRAINER', 'UPDATE', 'DLC', 'PATCH', 'CRACKFIX', 'MACOS', 'LINUX'}
 
-                for game_name, group_name in matches:
-                    # --- APPLY THE NEW LOGIC HERE ---
-                    # Prepare a set of keywords from the release found on Reddit
-                    cleaned_reddit_title_set = set(game_name.strip().replace('.', ' ').replace('_', ' ').lower().split())
+        for submission in redditor.submissions.new(limit=100):
+            if "Daily Releases" not in submission.title:
+                continue
+
+            pattern = re.compile(r"^\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|", re.MULTILINE)
+            matches = pattern.findall(submission.selftext)
+
+            for game_name, group_name in matches:
+                cleaned_reddit_title_set = set(game_name.strip().replace('.', ' ').replace('_', ' ').lower().split())
+                
+                # Check 1: Is it the right game?
+                if not title_keywords.issubset(cleaned_reddit_title_set):
+                    continue
                     
-                    # Check if all of our game's keywords are present in the Reddit title
-                    if title_keywords.issubset(cleaned_reddit_title_set):
-                        current_app.logger.info(f"       --> Found Reddit match in post '{submission.title}': {game_name.strip()} by {group_name.strip()}")
-                        return game_name.strip(), group_name.strip()
+                # Check 2: Does it contain blocked words?
+                if any(blocked_word in {word.upper() for word in cleaned_reddit_title_set} for blocked_word in BLOCKED_KEYWORDS):
+                    continue
+
+                # If both checks pass, it's a valid release.
+                current_app.logger.info(f"       --> Found Reddit match: {game_name.strip()} by {group_name.strip()}")
+                return game_name.strip(), group_name.strip()
 
     except Exception as e:
         current_app.logger.error(f"    -> ERROR: Reddit check failed: {e}")
@@ -309,50 +309,59 @@ def check_source_reddit(game_title): # <-- Notice 'settings' is gone from the ar
     return None, None
 
 def check_reddit_deep_search(game_title):
+    """
+    Performs a deep search of Reddit for a historical, full game release.
+    """
+    current_app.logger.info(f"    -> Performing Reddit deep search for '{game_title}'...")
     settings = get_settings_dict()
-    try:
-        if not all([settings.get('reddit_client_id'), settings.get('reddit_client_secret'),
-                    settings.get('reddit_username'), settings.get('reddit_password')]):
-            current_app.logger.info("    -> Reddit credentials not configured. Skipping deep search.")
-            return None, None
 
+    if not all([settings.get('reddit_client_id'), settings.get('reddit_client_secret'), settings.get('reddit_username'), settings.get('reddit_password')]):
+        current_app.logger.warning("    -> Reddit credentials not configured. Skipping deep search.")
+        return None, None
+
+    try:
         reddit = praw.Reddit(
             client_id=settings.get('reddit_client_id'),
             client_secret=settings.get('reddit_client_secret'),
-            user_agent="Gamearr v1.0 Deep Search",
+            user_agent="Gamearr v1.1 Deep Search",
             username=settings.get('reddit_username'),
             password=settings.get('reddit_password')
         )
 
-        # The subreddit where EssenseOfMagic posts
         target_subreddit = "CrackWatch"
-        # This query is the key: it searches for posts by the author that contain our game title
         search_query = f'author:EssenseOfMagic "{game_title}"'
-        
-        current_app.logger.info(f"       -> Searching 'r/{target_subreddit}' with query: '{search_query}'")
         subreddit = reddit.subreddit(target_subreddit)
-        
-        # Search a deep backlog of posts
         search_results = subreddit.search(search_query, sort='new', limit=100)
 
+        # We must define these here to use in the loop
+        normalized_title = game_title.replace(':', '').lower()
+        title_keywords = set(normalized_title.split())
+        BLOCKED_KEYWORDS = {'TRAINER', 'UPDATE', 'DLC', 'PATCH', 'CRACKFIX', 'MACOS', 'LINUX'}
+        
         for submission in search_results:
-            # We can add a quick filter to ensure it's a release post
             if "daily releases" not in submission.title.lower():
                 continue
 
-            # Parse the markdown table in the post body
             pattern = re.compile(r"^\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|", re.MULTILINE)
             matches = pattern.findall(submission.selftext)
 
             for game_name, group_name in matches:
-                # If Reddit's search found the post, a simple 'in' check is a good final validation
-                if game_title.lower() in game_name.strip().lower():
-                    current_app.logger.info(f"       --> Found historical match in post '{submission.title}': {game_name.strip()} by {group_name.strip()}")
-                    return game_name.strip(), group_name.strip()
+                # Use a simple 'in' check for deep search, as the Reddit search is already targeted
+                if game_title.lower() not in game_name.strip().lower():
+                    continue
+
+                # Still perform the critical check for blocked words
+                cleaned_reddit_title_set = set(game_name.strip().replace('.', ' ').replace('_', ' ').lower().split())
+                if any(blocked_word in {word.upper() for word in cleaned_reddit_title_set} for blocked_word in BLOCKED_KEYWORDS):
+                    continue
+
+                current_app.logger.info(f"       --> Found historical match: {game_name.strip()} by {group_name.strip()}")
+                return game_name.strip(), group_name.strip()
 
     except Exception as e:
-        current_app.logger.info(f"    -> ERROR: Reddit deep search failed: {e}")
-    return None, None # Return tuple on failure
+        current_app.logger.error(f"    -> ERROR: Reddit deep search failed: {e}")
+    
+    return None, None
 
 def check_source_rss(feed_url, game_title):
     try:
@@ -386,62 +395,69 @@ def check_source_rss(feed_url, game_title):
 
 def find_release_for_game(game_id):
     """
-    The unified search engine, now using SQLAlchemy.
-    It fetches the game by its ID and updates the object directly.
+    The unified search engine, now using the correct server-side 'section'
+    filter for the predb.net API call.
     """
-    # 1. Fetch the game object from the database using its ID
     game = Game.query.get(game_id)
-    if not game:
-        current_app.logger.error(f"find_release_for_game was called with invalid game_id: {game_id}")
-        return False
+    if not game: return False
         
     current_app.logger.info(f"--> Processing '{game.official_title}'")
-    settings = get_settings_dict()
-
-    # --- TIER 1: SCENE CHECK (api.predb.net) ---
+    
+    # --- TIER 1: SCENE CHECK (with the correct API parameter) ---
     try:
         sanitized_title = ''.join(e for e in game.official_title if e.isalnum() or e.isspace()).strip()
         url = "https://api.predb.net/"
-        params = {'type': 'search', 'q': sanitized_title, 'sort': 'DESC'}
+        
+        # --- THIS IS THE FIX ---
+        # We now tell the API to only search in sections that contain the word "GAMES".
+        # This is far more efficient than fetching everything and filtering it ourselves.
+        params = {
+            'type': 'search',
+            'q': sanitized_title,
+            'section': 'GAMES', # This is the key parameter
+            'sort': 'DESC'
+        }
+        # --- END OF FIX ---
+
         response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
         results = response.json().get('data', [])
 
         if results:
-            current_app.logger.info(f"    -> api.predb.net returned {len(results)} results for '{sanitized_title}'.")
+            current_app.logger.info(f"    -> api.predb.net (GAMES section) returned {len(results)} results for '{sanitized_title}'.")
+            
+            # These keyword checks are still valuable for filtering out trainers, DLCs, etc.
             normalized_title = game.official_title.replace(':', '').lower()
             title_keywords = set(normalized_title.split())
             BLOCKED_KEYWORDS = {'TRAINER', 'UPDATE', 'DLC', 'PATCH', 'CRACKFIX', 'MACOS', 'LINUX', 'NSW', 'PS5', 'PS4', 'XBOX'}
 
             for release in results:
-
-                if 'GAMES' not in release.get('cat', '').upper():
-                    continue
-
-                cleaned_release_for_keywords = release.get('release', '').upper().replace('.', ' ').replace('_', ' ').replace('-', ' ')
+                release_name = release.get('release', '')
+                
+                # We no longer need the 'Category Gatekeeper' check here,
+                # as the API has already done it for us.
+                
+                cleaned_release_for_keywords = release_name.upper().replace('.', ' ').replace('_', ' ').replace('-', ' ')
                 release_keyword_set = set(cleaned_release_for_keywords.split())
                 title_keywords_upper = {keyword.upper() for keyword in title_keywords}
                 
-                # Relevance and Quality Checks (logic is unchanged)
                 if not title_keywords_upper.issubset(release_keyword_set):
                     continue
+                
                 if any(blocked_word in release_keyword_set for blocked_word in BLOCKED_KEYWORDS):
                     continue
                 
-                # --- THIS IS THE SQLAlchemy UPDATE ---
-                # We found a valid release, so we update the game object's attributes.
-                found_release_name = release['release']
-                db_nfo_path, db_nfo_img_path = fetch_and_save_nfo(found_release_name)
+                # If we get here, it's a valid release.
+                db_nfo_path, db_nfo_img_path = fetch_and_save_nfo(release_name)
                 
                 game.status = 'Definitely Cracked'
-                game.release_name = found_release_name
-                game.release_group = release['group']
+                game.release_name = release_name
+                game.release_group = release.get('group')
                 game.nfo_path = db_nfo_path
                 game.nfo_img_path = db_nfo_img_path
                 
-                # Commit the changes to the database
                 db.session.commit()
-                current_app.logger.info(f"    SUCCESS! Found Scene release: {found_release_name}")
+                current_app.logger.info(f"    SUCCESS! Found Scene release: {release_name}")
                 return True
     
     except Exception as e:
@@ -486,6 +502,7 @@ def find_release_for_game(game_id):
 
     current_app.logger.info(f"    No release found for '{game.official_title}' after all automated checks.")
     return False
+
 
 def fetch_and_save_nfo(release_name):
     """

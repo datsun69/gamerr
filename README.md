@@ -1,0 +1,95 @@
+# Gamerr
+
+> **Warning: Alpha Software**
+> This application is in the early stages of development. It is functional but should be considered alpha software. Expect bugs, breaking changes, and a rapidly evolving feature set.
+
+<!-- Add a screenshot of the main library page here -->
+![Gamerr Screenshot](https://via.placeholder.com/800x400.png?text=Gamerr+Screenshot+Goes+Here)
+
+## Core Concept
+
+Gamerr is a Python-based `*arr`-style application for managing and automating the acquisition of PC games. The application allows a user to monitor for game releases from various sources. Once a release is found, it integrates with download clients to handle the download and subsequent post-processing.
+
+The project is built with Flask and SQLite on the backend and uses a clean, functional web interface.
+
+## Key Features
+
+*   **IGDB Integration:** Add new games by searching the IGDB database for official metadata, cover art, and release dates.
+*   **Multi-Tiered Release Finding:** Automatically scans for new releases using a sophisticated strategy:
+    *   **Tier 1:** Checks predb.net for scene releases.
+    *   **Tier 2:** Checks Reddit and public RSS feeds for new P2P releases.
+    *   **Tier 3:** Performs a deep search of Reddit's history for older releases.
+*   **Download Client Integration:** Sends found releases to qBittorrent via its Web API and monitors download progress.
+*   **Library Management:** Includes features to import existing game libraries and discover new games from curated lists.
+*   **Modern UI:** A clean, responsive interface with a card-based layout for easy browsing.
+
+## Getting Started
+
+You can run Gamerr either locally for development or as a Docker container for production.
+
+### Running Locally (for Development)
+
+This method is ideal for contributing to the code or running on a local Windows/macOS/Linux machine.
+
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/datsun69/gamerr.git
+    cd gamerr
+    ```
+
+2.  **Create and activate a virtual environment:**
+    ```bash
+    # For Windows
+    python -m venv venv
+    venv\Scripts\activate
+
+    # For macOS/Linux
+    python3 -m venv venv
+    source venv/bin/activate
+    ```
+
+3.  **Install the required packages:**
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+4.  **Set required environment variables:**
+    Gamerr needs to know where your game library is located.
+    ```bash
+    # For Windows CMD (use your actual network/local path)
+    set LIBRARY_PATH=\\YOUR_SERVER\path\to\games
+    set DOWNLOADS_PATH=\\YOUR_SERVER\path\to\games\_downloads
+
+    # For PowerShell
+    $env:LIBRARY_PATH = '\\YOUR_SERVER\path\to\games'
+    $env:DOWNLOADS_PATH = '\\YOUR_SERVER\path\to\games\_downloads'
+    ```
+
+5.  **Initialize the database:**
+    The first time you run the app, you need to create the database schema.
+    ```bash
+    flask db init # This command needs to be created if not already done. A simpler way is to just run the app and let SQLAlchemy create it.
+    ```
+    *Note: For the current setup, simply running the app will create the database automatically.*
+
+6.  **Run the application:**
+    ```bash
+    python run.py
+    ```
+    The application will be available at `http://127.0.0.1:5000`.
+
+### Running with Docker (Recommended for Production)
+
+This is the easiest and most reliable way to run Gamerr on a server like Unraid. This example runs the Gamerr container by itself. For a full stack with qBittorrent, please see the `docker-compose.yml` file in the repository.
+
+```bash
+docker run -d \
+  --name=Gamerr \
+  -p 5000:5000 \
+  -v /path/on/your/server/appdata/Gamerr:/app/instance \
+  -v /path/on/your/server/games:/games \
+  -e LIBRARY_PATH=/games \
+  -e DOWNLOADS_PATH=/games/_downloads \
+  -e TZ="Europe/London" \
+  --restart unless-stopped \
+  yourdockerhub/Gamerr:latest

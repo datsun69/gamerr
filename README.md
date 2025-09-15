@@ -68,7 +68,7 @@ This method is ideal for contributing to the code or running on a local Windows/
 5.  **Initialize the database:**
     The first time you run the app, you need to create the database schema.
     ```bash
-    flask db init # This command needs to be created if not already done. A simpler way is to just run the app and let SQLAlchemy create it.
+    flask db init
     ```
     *Note: For the current setup, simply running the app will create the database automatically.*
 
@@ -93,3 +93,33 @@ docker run -d \
   -e TZ="Europe/London" \
   --restart unless-stopped \
   yourdockerhub/Gamerr:latest
+```
+
+**Parameter Breakdown:**
+*   `-p 5000:5000`: Maps the container's port 5000 to your host's port 5000.
+*   `-v /path/on/your/server/appdata/gamearr:/app/instance`: **CRITICAL.** Maps a folder on your server to the container's `instance` folder to persist the database and configuration. **You must change the left side.**
+*   `-v /path/on/your/server/games:/games`: **CRITICAL.** Maps your game library on your server to the `/games` folder inside the container. **You must change the left side.**
+*   `-e LIBRARY_PATH=/games`: Tells the application to use the container path for the library.
+*   `-e DOWNLOADS_PATH=/games/_downloads`: Tells the application to use the container path for the downloads folder.
+
+### Roadmap & To-Do List
+
+This project is actively being developed. The current roadmap includes:
+
+-   [x] Core refactor from a single file to a structured Flask application.
+-   [x] Feature: Import existing games from a folder structure.
+-   [x] Feature: Discover new and popular games from within the app.
+-   [ ] **Settings Page Overhaul:**
+    -   [ ] Add collapsible sections for better organization.
+    -   [ ] Implement dynamic CRUD (Create, Read, Update, Delete) for Jackett indexers.
+    -   [ ] Redact secrets (passwords, API keys) in the UI.
+    -   [ ] Add robust input validation using Flask-WTF.
+-   [ ] **Advanced Release Management:**
+    -   [ ] "Related Releases" engine to track and manage updates, patches, and DLCs.
+    -   [ ] "Upscale" feature to find better-quality releases for already-imported games.
+
+### Limitations
+
+*   **qBittorrent Only:** Currently, qBittorrent is the only supported download client.
+*   **Release Parsing:** The release name parsing is robust but may not correctly identify every possible format.
+*   **Windows Development:** Running in the Flask development server on Windows can cause some non-critical logging errors due to file locking. The Docker container on Linux does not have this issue.

@@ -3,8 +3,7 @@
 > **Warning: Alpha Software**
 > This application is in the early stages of development. It is functional but should be considered alpha software. Expect bugs, breaking changes, and a rapidly evolving feature set.
 
-<!-- Add a screenshot of the main library page here -->
-![Gamerr Screenshot](https://via.placeholder.com/800x400.png?text=Gamerr+Screenshot+Goes+Here)
+(Will add screenshot)
 
 ## Core Concept
 
@@ -92,7 +91,7 @@ docker run -d \
   -e DOWNLOADS_PATH=/games/_downloads \
   -e TZ="Europe/London" \
   --restart unless-stopped \
-  yourdockerhub/Gamerr:latest
+  datsun69/gamerr:latest
 ```
 
 **Parameter Breakdown:**
@@ -110,7 +109,7 @@ This project is actively being developed. The current roadmap includes:
 -   [x] Feature: Import existing games from a folder structure.
 -   [x] Feature: Discover new and popular games from within the app.
 -   [ ] **Settings Page Overhaul:**
-    -   [ ] Add collapsible sections for better organization.
+    -   [x] Add collapsible sections for better organization.
     -   [ ] Implement dynamic CRUD (Create, Read, Update, Delete) for Jackett indexers.
     -   [ ] Redact secrets (passwords, API keys) in the UI.
     -   [ ] Add robust input validation using Flask-WTF.
@@ -121,5 +120,6 @@ This project is actively being developed. The current roadmap includes:
 ### Limitations
 
 *   **qBittorrent Only:** Currently, qBittorrent is the only supported download client.
+*   **Jackett Only:** Currently, it only works by configuring indexers from Jackett.
 *   **Release Parsing:** The release name parsing is robust but may not correctly identify every possible format.
 *   **Windows Development:** Running in the Flask development server on Windows can cause some non-critical logging errors due to file locking. The Docker container on Linux does not have this issue.

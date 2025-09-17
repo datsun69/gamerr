@@ -61,15 +61,8 @@
 
                         <p class="no-padding no-margin">${releaseDate}</p>
                     </div>
-                    <form action="{{ url_for('main.add_game_confirm') }}" method="post" class="card-actions-form">
+                    <form action="{{ url_for('main.add_game_confirm') }}" method="post" style="justify-content: space-between;padding: 1rem;">
                         <input type="hidden" name="igdb_id" value="${game.id}">
-                        <input type="hidden" name="official_title" value="${game.name}">
-                        
-                        <!-- THIS IS THE CRITICAL FIX -->
-                        <input type="hidden" name="slug" value="${game.slug}">
-                        
-                        <input type="hidden" name="cover_url" value="${game.cover_url || ''}">
-                        <input type="hidden" name="release_timestamp" value="${game.release_timestamp || ''}">
                         <button type="submit" class="btn btn-blue btn-sm"><span class="material-symbols-outlined">add</span></button>
                         <a href="https://www.igdb.com/games/${game.slug}" target="_blank" rel="noopener noreferrer" class="btn btn-lime btn-sm">
                             <span class="material-symbols-outlined">open_in_new</span>

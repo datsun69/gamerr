@@ -5,135 +5,135 @@
 {% block content %}
 <ul class="game-list">
     {% for game in games %}
+        <!-- The LI is the main container with all data attributes -->
         <li class="game-card" data-id="{{ game.id }}" data-status="{{ game.status }}">
             
-            {% if game.cover_url %}
-                <img src="https:{{ game.cover_url }}" alt="Cover for {{ game.official_title }}" class="game-cover">
-            {% endif %}
-            <span class="game-meta status-badge game-status
-                {% if 'definitely cracked' in game.status.lower() %}status-cracked
-                {% elif 'probably cracked' in game.status.lower() %}status-p2p
-                {% else %}status-{{ game.status.lower() }}
-                {% endif %}"
-                {% if game.release_name %}title="Evidence: {{ game.release_name }}"{% endif %}>
-                {{ game.status|replace("Definitely Cracked", "Cracked (scene)")|replace("Probably Cracked (P2P)", "Cracked (P2P)")}}
-            </span>            
-            <div class="game-details">
-                <h3>{{ game.official_title }}</h3>
-                
-                
-
-                
-                <small>
-                    <strong>Date:</strong> {{ game.release_date or 'N/A' }}<br>
-                    <!-- THE FIX: We added a 'game-release-name' class to this span -->
-                    <strong>Release:</strong> <span class="game-release-name">{{ game['release_name'] or 'Awaiting Release Info' }}</span><br>
-                    <strong>Group:</strong> {{ game['release_group'] or 'N/A' }} <br><br>
-                    
-                    {% if game['nfo_img_path'] %}<a href="{{ url_for('main.serve_nfo_file', filename=game['nfo_img_path']) }}" target="_blank">View NFO</a>
-                    {% else %}{% endif %}
-                </small>
-
-                <div class="game-actions">
-                    {% if game.status and ('Cracked' in game.status or 'Downloaded' in game.status) %}
-                        <a href="{{ url_for('main.interactive_search', game_id=game.id) }}" class="btn btn-blue btn-sm">
-                            <span class="material-symbols-outlined">search</span>
-                        </a>
-                    {% endif %}
-                    
-
-                    {% if game.slug %}
-                    <a href="https://www.igdb.com/games/{{ game.slug }}" target="_blank" rel="noopener noreferrer" class="btn btn-lime btn-sm">
-                        <span class="material-symbols-outlined">open_in_new</span>
-                    </a>
-                    {% endif %}
-
-                    <form action="{{ url_for('main.delete_game', game_id=game.id) }}" method="post">
-                        <button type="submit" class="btn btn-red btn-sm" onclick="return confirm('Are you sure?');">
-                            <span class="material-symbols-outlined">delete</span>
-                        </button>
-                    </form>
+            <!-- The link wraps the visual elements -->
+            <a href="{{ url_for('main.game_detail', game_id=game.id) }}" class="game-card-link">
+                {% if game.cover_url %}
+                    <img src="https:{{ game.cover_url }}" alt="{{ game.official_title }} Cover" class="game-cover">
+                {% endif %}
+                <div class="game-details">
+                    <h3>{{ game.official_title }}</h3>
+                    <p>{{ game.release_date or 'N/A' }}</p>
                 </div>
+            </a>
+
+            <!-- The status badge is separate from the link, for easier updates -->
+            <div class="status-badge-container">
+                <span class="status-badge game-status
+                    {% if 'definitely cracked' in game.status.lower() %}status-cracked
+                    {% elif 'probably cracked' in game.status.lower() %}status-p2p
+                    {% elif 'processing' in game.status.lower() %}status-processing
+                    {% else %}status-{{ game.status.lower().replace('%', '') }}
+                    {% endif %}">
+                    {% if game.status == 'Processing' %}
+                        <div class="spinner-inline"></div> Processing...
+                    {% else %}
+                        {{ game.status|replace("Definitely Cracked", "Cracked")|replace("Probably Cracked (P2P)", "Cracked") }}
+                    {% endif %}
+                </span>
             </div>
         </li>
     {% else %}
-        <li class="game-card">No games are being monitored yet. Add one to get started!</li>
+        <li class="game-card-placeholder">
+            <p>No games in your library yet.</p>
+            <a href="{{ url_for('main.add_game_search') }}" class="btn btn-primary">Add Your First Game</a>
+        </li>
     {% endfor %}
 </ul>
+
+{% if pagination %}
+<nav aria-label="Game navigation">
+  <ul class="pagination justify-content-center">
+
+    <!-- "Previous" Link -->
+    <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
+      <a class="page-link" href="{{ url_for('main.index', page=pagination.prev_num) }}">Previous</a>
+    </li>
+
+    <!-- Page Number Links -->
+    {% for page_num in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+      {% if page_num %}
+        {% if pagination.page == page_num %}
+          <li class="page-item active"><a class="page-link" href="{{ url_for('main.index', page=page_num) }}">{{ page_num }}</a></li>
+        {% else %}
+          <li class="page-item"><a class="page-link" href="{{ url_for('main.index', page=page_num) }}">{{ page_num }}</a></li>
+        {% endif %}
+      {% else %}
+        <li class="page-item disabled"><span class="page-link">...</span></li>
+      {% endif %}
+    {% endfor %}
+
+    <!-- "Next" Link -->
+    <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
+      <a class="page-link" href="{{ url_for('main.index', page=pagination.next_num) }}">Next</a>
+    </li>
+
+  </ul>
+</nav>
+{% endif %}
+
 {% endblock %}
+
+
+
 
 
 {% block scripts %}
 <script>
     document.addEventListener('DOMContentLoaded', function() {
-        const monitoredGames = document.querySelectorAll('.game-card[data-status="Monitoring"]');
+        // Find all cards that need polling
+        const gamesToPoll = document.querySelectorAll('.game-card[data-status="Processing"], .game-card[data-status*="Downloading"], .game-card[data-status="Snatched"], .game-card[data-status="Monitoring"]');
 
         const statusClassMap = {
             'definitely cracked': 'status-cracked',
             'probably cracked (p2p)': 'status-p2p',
+            'processing': 'status-processing',
             'monitoring': 'status-monitoring',
             'downloading': 'status-downloading',
             'downloaded': 'status-downloaded',
             'snatched': 'status-snatched',
             'imported': 'status-imported'
         };
-        const allStatusClasses = Object.values(statusClassMap);
 
-        if (monitoredGames.length > 0) {
+        if (gamesToPoll.length > 0) {
             const checkStatuses = () => {
-                monitoredGames.forEach(card => {
+                gamesToPoll.forEach(card => {
                     const gameId = card.dataset.id;
-                    if (card.dataset.status === 'Monitoring') {
+                    // Only poll if the card is still in a transitional state
+                    if (!['Imported', 'Definitely Cracked', 'Probably Cracked (P2P)'].includes(card.dataset.status)) {
                         fetch(`/game/status/${gameId}`)
                             .then(response => response.json())
                             .then(data => {
-                                if (data.status !== 'Monitoring') {
-                                    const statusElement = card.querySelector('.game-status');
-                                    
-                                    if (statusElement) {
-                                        // --- FIX #1: FRIENDLY STATUS RENAMING ---
-                                        let displayStatus = data.status
-                                            .replace("Definitely Cracked", "Cracked (scene)")
-                                            .replace("Probably Cracked (P2P)", "Cracked (P2P)");
-                                        statusElement.textContent = displayStatus;
-                                        // ------------------------------------
+                                // Only update if the status has actually changed
+                                if (card.dataset.status !== data.status) {
+                                    card.dataset.status = data.status; // Update the data attribute immediately
 
-                                        statusElement.classList.remove(...allStatusClasses);
-                                        const newStatusClass = statusClassMap[data.status.toLowerCase()];
+                                    const statusElement = card.querySelector('.game-status');
+                                    if (statusElement) {
+                                        let displayStatus = data.status
+                                            .replace("Definitely Cracked", "Cracked")
+                                            .replace("Probably Cracked (P2P)", "Cracked");
+                                        
+                                        // Update status text/spinner
+                                        if (data.status === 'Processing') {
+                                            statusElement.innerHTML = '<div class="spinner-inline"></div> Processing...';
+                                        } else {
+                                            statusElement.innerHTML = displayStatus;
+                                        }
+
+                                        // Update the status class for the correct color
+                                        Object.values(statusClassMap).forEach(cls => statusElement.classList.remove(cls));
+                                        let statusKey = data.status.toLowerCase();
+                                        if (statusKey.startsWith('downloading')) {
+                                            statusKey = 'downloading'; // Group all "Downloading X%" under one class
+                                        }
+                                        const newStatusClass = statusClassMap[statusKey];
                                         if (newStatusClass) {
                                             statusElement.classList.add(newStatusClass);
                                         }
                                     }
-
-                                    const releaseNameElement = card.querySelector('.game-release-name');
-                                    if (releaseNameElement && data.release_name) {
-                                        releaseNameElement.textContent = data.release_name;
-                                    }
-
-                                    const actionsContainer = card.querySelector('.game-actions');
-                                    if (actionsContainer) {
-                                        const deleteFormHTML = actionsContainer.querySelector('form').outerHTML;
-                                        
-                                        // --- FIX #2: BUILD AND ADD THE IGDB LINK ---
-                                        let igdbLinkHTML = '';
-                                        if (data.slug) {
-                                            igdbLinkHTML = `
-                                                <a href="https://www.igdb.com/games/${data.slug}" target="_blank" rel="noopener noreferrer" class="btn btn-lime btn-sm" title="Open IGDB Page">
-                                                    <span class="material-symbols-outlined">open_in_new</span>
-                                                </a>
-                                            `;
-                                        }
-                                        // ------------------------------------------
-                                        
-                                        actionsContainer.innerHTML = `
-                                            <a href="/search/${gameId}" class="btn btn-blue btn-sm" title="Search Manually">
-                                                <span class="material-symbols-outlined">search</span>
-                                            </a>
-                                            ${igdbLinkHTML}
-                                            ${deleteFormHTML}
-                                        `;
-                                    }
-                                    card.dataset.status = data.status;
                                 }
                             });
                     }

@@ -7,34 +7,37 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from .config import Config
 
 import logging
-from logging.handlers import RotatingFileHandler
+import sys
+from concurrent_log_handler import ConcurrentRotatingFileHandler
 
 # Create extension instances without an app
 db = SQLAlchemy()
 scheduler = BackgroundScheduler(daemon=True)
 
-def create_app(config_class=Config): # We can add the default back, it's clean
-    """Creates and configures an instance of the Flask application."""
+def create_app(config_class=Config):
     app = Flask(__name__, instance_relative_config=True)
-    
-    # Load the config from the passed-in class
     app.config.from_object(config_class)
+    
+    app.logger.setLevel(logging.INFO)
 
-    if app.debug:
-        # In debug mode, just log to the console.
-        # This avoids all the Windows file locking issues with the reloader and threads.
-        app.logger.setLevel(logging.INFO)
-    else:
-        # Only set up file logging when in production (not debug mode).
-        os.makedirs('logs', exist_ok=True)
-        file_handler = RotatingFileHandler('logs/gamearr.log', maxBytes=10240, backupCount=10)
+    if not app.debug:
+        log_dir = os.path.join(app.instance_path, 'logs')
+        os.makedirs(log_dir, exist_ok=True)
+        
+        # --- FIX: Use the concurrent-safe handler ---
+        # This will safely handle log rotations from multiple threads.
+        file_handler = ConcurrentRotatingFileHandler(
+            os.path.join(log_dir, 'gamearr.log'), 
+            maxBytes=10240, 
+            backupCount=10
+        )
+        
         file_handler.setFormatter(logging.Formatter(
             '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'))
-        file_handler.setLevel(logging.INFO)
+        
         app.logger.addHandler(file_handler)
 
-    app.logger.setLevel(logging.INFO)
-    app.logger.info('Gamerr startup')
+    app.logger.info('Gamearr startup')
 
     try:
         os.makedirs(app.instance_path)
@@ -61,8 +64,13 @@ def create_app(config_class=Config): # We can add the default back, it's clean
                 scheduler.add_job(func=jobs.check_for_releases, trigger="interval", minutes=30, id="release_check_job", replace_existing=True, args=[app])
                 scheduler.add_job(func=jobs.update_download_statuses, trigger="interval", minutes=1, id="download_update_job", replace_existing=True, args=[app])
                 scheduler.add_job(func=jobs.process_search_tasks, trigger="interval", seconds=5, id="search_task_job", replace_existing=True, args=[app])
+                
+                scheduler.add_job(func=jobs.process_release_check_queue, trigger="interval", seconds=5, id="release_queue_job", replace_existing=True, args=[app], max_instances=3)
+                
                 scheduler.add_job(func=jobs.process_completed_downloads, trigger="interval", minutes=5, id="post_process_job", replace_existing=True, args=[app])
                 scheduler.add_job(func=jobs.refresh_discover_cache, trigger="interval", hours=24, id="discover_refresh_job", replace_existing=True, args=[app])
+                scheduler.add_job(func=jobs.process_content_scan_queue, trigger="interval", seconds=15, id="content_queue_job", replace_existing=True, args=[app])
+                scheduler.add_job(func=jobs.scan_all_library_games, trigger="interval", hours=12, id="additional_content_job", replace_existing=True, args=[app])
                 scheduler.start()
 
     return app

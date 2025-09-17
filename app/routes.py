@@ -10,7 +10,7 @@ import time
 
 from . import db
 from .models import Game, Setting, SearchTask, DiscoverCache
-from .services import search_jackett, add_to_qbittorrent, get_qbit_client, process_library_scan
+from .services import search_jackett, add_to_qbittorrent, get_qbit_client, process_library_scan, get_igdb_game_details
 from .jobs import check_single_game_release
 
 main = Blueprint('main', __name__)
@@ -45,8 +45,22 @@ def format_seconds(seconds):
 # Main Routes
 @main.route('/')
 def index():
-    games = Game.query.order_by(Game.id.desc()).all()
-    return render_template('index.html', games=games)
+    
+    # 1. Get the page number from the URL, e.g., /?page=2. Default to page 1.
+    page = request.args.get('page', 1, type=int)
+    
+    # 2. Instead of .all(), use .paginate().
+    #    This creates a pagination object containing the games for the current page
+    #    as well as info for building the navigation links.
+    pagination = Game.query.order_by(Game.id.desc()).paginate(
+        page=page, per_page=50, error_out=False
+    )
+    
+    # 3. The actual list of games for the current page is in pagination.items
+    games = pagination.items
+    
+    # 4. Pass the *pagination object itself* to the template as well.
+    return render_template('index.html', games=games, pagination=pagination)
 
 # Add/Search Game Routes
 @main.route('/add', methods=['GET', 'POST'])
@@ -82,54 +96,30 @@ def get_search_results_data(task_id):
 
 @main.route('/add/confirm', methods=['POST'])
 def add_game_confirm():
-    """
-    Handles adding a new game to the library from various sources.
-    This is the endpoint for the 'Add' buttons from both Search and Discover.
-    """
     igdb_id = request.form.get('igdb_id')
-    official_title = request.form.get('official_title')
-    slug = request.form.get('slug') # You already have this line, which is great!
-    exists = Game.query.filter_by(igdb_id=igdb_id).first()
-
-    # --- Input Validation ---
-    if not igdb_id or not official_title:
-        flash("Could not add game: Missing required information.", "error")
+    if not igdb_id:
+        flash("Invalid request. No game ID provided.", "error")
         return redirect(url_for('main.add_game_search'))
 
-    # --- Duplicate Check ---
     exists = Game.query.filter_by(igdb_id=igdb_id).first()
     if exists:
-        flash(f"'{official_title}' is already in your library.", "info")
+        flash(f"'{exists.official_title}' is already in your library.", "info")
         return redirect(url_for('main.index'))
 
-    # --- Date Handling ---
-    release_date_str = request.form.get('release_date_str')
-    release_timestamp = request.form.get('release_timestamp')
+    game_details = get_igdb_game_details(igdb_id)
+    if not game_details:
+        flash("Could not fetch full details for that game from IGDB.", "error")
+        return redirect(url_for('main.add_game_search'))
 
-    release_date = None
-    if release_date_str:
-        release_date = release_date_str
-    elif release_timestamp and release_timestamp != 'None':
-        release_date = current_app.jinja_env.filters['timestamp_to_date'](release_timestamp)
-
-    # --- Create and Save the New Game ---
-        new_game = Game(
-            igdb_id=igdb_id,
-            official_title=official_title,
-            slug=slug, # <-- We are now saving the slug to the database model
-            cover_url=request.form.get('cover_url'),
-            release_date=release_date, # Your date logic variable
-            status='Monitoring'
-        )
-        db.session.add(new_game)
-        db.session.commit()
-
-    flash(f"'{official_title}' has been added and is being monitored.", "success")
+    new_game = Game(**game_details, status='Processing')
     
-    # --- Trigger an Immediate Release Check ---
-    import threading
-    thread = threading.Thread(target=check_single_game_release, args=(current_app._get_current_object(), new_game.id))
-    thread.start()
+    new_game.needs_release_check = True
+    
+    db.session.add(new_game)
+    db.session.commit()
+
+    # 2. Update the flash message to be more accurate.
+    flash(f"'{new_game.official_title}' has been added and a release check has been queued.", "success")
     
     return redirect(url_for('main.index'))
 
@@ -174,7 +164,15 @@ def library_import_confirm():
 @main.route('/search/<int:game_id>', methods=['GET', 'POST'])
 def interactive_search(game_id):
     game = Game.query.get_or_404(game_id)
-    search_term = request.form.get('search_term', game.release_name or game.official_title)
+    
+    search_term = (
+        request.args.get('q') or 
+        request.form.get('search_term') or 
+        game.release_name or 
+        game.official_title
+    )
+    # --- END OF FIX ---
+    
     jackett_results = search_jackett(search_term)
     return render_template('search.html', game=game, results=jackett_results, search_term=search_term)
 
@@ -286,6 +284,13 @@ def delete_game(game_id):
     db.session.delete(game)
     db.session.commit()
     return redirect(url_for('main.index'))
+
+@main.route('/game/<int:game_id>')
+def game_detail(game_id):
+    """Displays the detailed page for a single game."""
+    game = Game.query.get_or_404(game_id)
+    # The 'additional_releases' relationship is automatically available here
+    return render_template('game_detail.html', game=game)
 
 @main.route('/nfo/<path:filename>')
 def serve_nfo_file(filename):

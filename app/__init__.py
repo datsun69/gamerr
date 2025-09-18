@@ -64,12 +64,9 @@ def create_app(config_class=Config):
                 scheduler.add_job(func=jobs.check_for_releases, trigger="interval", minutes=30, id="release_check_job", replace_existing=True, args=[app])
                 scheduler.add_job(func=jobs.update_download_statuses, trigger="interval", minutes=1, id="download_update_job", replace_existing=True, args=[app])
                 scheduler.add_job(func=jobs.process_search_tasks, trigger="interval", seconds=5, id="search_task_job", replace_existing=True, args=[app])
-                
-                scheduler.add_job(func=jobs.process_release_check_queue, trigger="interval", seconds=5, id="release_queue_job", replace_existing=True, args=[app], max_instances=3)
-                
+                scheduler.add_job(func=jobs.process_release_check_queue, trigger="interval", seconds=10, id="release_queue_job", replace_existing=True, args=[app], max_instances=3)
                 scheduler.add_job(func=jobs.process_completed_downloads, trigger="interval", minutes=5, id="post_process_job", replace_existing=True, args=[app])
                 scheduler.add_job(func=jobs.refresh_discover_cache, trigger="interval", hours=24, id="discover_refresh_job", replace_existing=True, args=[app])
-                scheduler.add_job(func=jobs.process_content_scan_queue, trigger="interval", seconds=15, id="content_queue_job", replace_existing=True, args=[app])
                 scheduler.add_job(func=jobs.scan_all_library_games, trigger="interval", hours=12, id="additional_content_job", replace_existing=True, args=[app])
                 scheduler.start()
 

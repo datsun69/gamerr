@@ -1,3 +1,5 @@
+# /gamearr/app/models.py
+
 from . import db  # We will create this 'db' object in __init__.py
 from datetime import datetime
 
@@ -34,13 +36,28 @@ class Game(db.Model):
     # This links a Game to all of its DLCs, Updates, etc.
     needs_content_scan = db.Column(db.Boolean, default=False, nullable=False)
     needs_release_check = db.Column(db.Boolean, default=False, nullable=False)
-    additional_releases = db.relationship('AdditionalRelease', backref='game', lazy='dynamic', cascade="all, delete-orphan")
+    additional_releases = db.relationship('AdditionalRelease', backref='game', lazy=True, cascade="all, delete-orphan")
+    alternative_releases = db.relationship('AlternativeRelease', backref='game', lazy=True, cascade="all, delete-orphan")
+    
+class AlternativeRelease(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    release_name = db.Column(db.String(300), nullable=False)
+    source = db.Column(db.String(50), nullable=False)
+    game_id = db.Column(db.Integer, db.ForeignKey('game.id'), nullable=False)
+    
+    # --- NEW NFO Fields ---
+    nfo_path = db.Column(db.String, nullable=True)
+    nfo_img_path = db.Column(db.String, nullable=True)
+
+    def __repr__(self):
+        return f'<AlternativeRelease {self.release_name}>'
 
 class AdditionalRelease(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     release_name = db.Column(db.String, nullable=False, unique=True)
     release_type = db.Column(db.String, nullable=False) # 'Update', 'DLC', 'Fix', 'Trainer'
     status = db.Column(db.String, default='Not Snatched', nullable=False)
+    source = db.Column(db.String(50), nullable=True)
     
     # This is the foreign key that links it back to the base game
     game_id = db.Column(db.Integer, db.ForeignKey('game.id'), nullable=False)
@@ -60,4 +77,4 @@ class DiscoverCache(db.Model):
     # This table will store the raw JSON content of a discover list
     list_name = db.Column(db.String, primary_key=True) # e.g., 'anticipated', 'coming_soon'
     content = db.Column(db.Text, nullable=False)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)    
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

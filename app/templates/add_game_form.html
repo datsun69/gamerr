@@ -44,6 +44,82 @@
     </details>
 
     {% if discover %}
+    <!-- NEW: Most Anticipated Section -->
+    <details class="content-card" open> <!-- The 'open' attribute makes it expanded by default -->
+        <summary class="collapsible-header">
+            <h2>Discover: Most Anticipated</h2>
+            <span class="material-symbols-outlined collapsible-icon">keyboard_arrow_down</span>
+        </summary>
+        <div class="details-content discover-grid">
+            {% for game in discover.get('anticipated', []) %}
+                <div class="game-card">
+                    {% if game.cover and game.cover.url %}
+                        <img src="{{ game.cover.url.replace('t_thumb', 't_cover_big') }}" alt="{{ game.name }} Cover" class="game-cover-discover">
+                    {% else %}
+                        <img src="https://via.placeholder.com/150x200.png?text=No+Cover" alt="No Cover Available">
+                    {% endif %}
+
+                    <div class="game-details">
+                        <a href="https://www.igdb.com/games/{{ game.slug }}" target="_blank" rel="noopener noreferrer">
+                            <h4>{{ game.name }}</h4>
+                        </a>
+
+                        <div class="game-buttons">
+                            <form action="{{ url_for('main.add_game_confirm') }}" method="post" class="game-card-form">
+                                <input type="hidden" name="igdb_id" value="{{ game.id }}">
+                                <button type="submit" class="btn btn-sm">Add</button>
+                            </form>
+                            <a href="https://www.igdb.com/games/{{ game.slug }}" target="_blank" class="btn btn-sm btn-lime"><span class="material-symbols-outlined">open_in_new</span></a>
+                        </div>
+                    </div>
+                </div>
+            {% else %}
+                <p>This list is currently empty. Run the update task to populate it.</p>
+            {% endfor %}
+        </div>
+    </details>
+
+    <details class="content-card">
+        <summary class="collapsible-header">
+            <h2>Discover: Popular Right Now</h2>
+            <span class="material-symbols-outlined collapsible-icon">keyboard_arrow_down</span>
+        </summary>
+        <div class="details-content discover-grid">
+            {% for game in discover.get('popular_now', []) %}
+                <div class="game-card">
+                    {% if game.cover and game.cover.url %}
+                        <img src="{{ game.cover.url.replace('t_thumb', 't_cover_big') }}" alt="{{ game.name }} Cover" class="game-cover-discover">
+                    {% else %}
+                        <img src="https://via.placeholder.com/150x200.png?text=No+Cover" alt="No Cover Available">
+                    {% endif %}
+                    {% if game.aggregated_rating %}
+                    <div class="status-badge-container status-badge game-status status-cracked">
+                        
+                                <span>Rating: {{ "%.0f"|format(game.aggregated_rating) }}</span>
+                        
+                    </div>
+                    {% endif %}
+                    <div class="game-details">
+                        <a href="https://www.igdb.com/games/{{ game.slug }}" target="_blank" rel="noopener noreferrer">
+                            <h4>{{ game.name }}</h4>
+                        </a>
+    
+                        <div class="game-buttons">
+                            <form action="{{ url_for('main.add_game_confirm') }}" method="post" class="game-card-form">
+                                <input type="hidden" name="igdb_id" value="{{ game.id }}">
+                                <button type="submit" class="btn btn-sm">Add</button>
+                            </form>
+                            <a href="https://www.igdb.com/games/{{ game.slug }}" target="_blank" class="btn btn-sm btn-lime"><span class="material-symbols-outlined">open_in_new</span></a>
+                        </div>
+                    </div>
+                </div>
+            {% else %}
+                <p>This list is currently empty. Run the update task to populate it.</p>
+            {% endfor %}
+        </div>
+    </details>
+
+    <!-- Existing: Top Reviewed Section -->
     <details class="content-card">
         <summary class="collapsible-header">
             <h2>Discover: Top Reviewed</h2>
@@ -56,15 +132,13 @@
                         <img src="{{ game.cover.url.replace('t_thumb', 't_cover_big') }}" alt="{{ game.name }} Cover" class="game-cover-discover">
                     {% else %}
                         <img src="https://via.placeholder.com/150x200.png?text=No+Cover" alt="No Cover Available">
-                    {% endif %}                    
-
-                    <div class="game-meta status-badge status-cracked">
-                        {% if game.aggregated_rating %}
-                                <span class="material-symbols-outlined">star</span>
-                                <span>{{ "%.0f"|format(game.aggregated_rating) }}</span>
-                        {% endif %}
+                    {% endif %}
+                    {% if game.total_rating %}
+                    <div class="status-badge-container status-badge game-status status-cracked">
+                                <span>Rating: {{ "%.0f"|format(game.total_rating) }}</span>
+                        
                     </div>
-
+                    {% endif %}
                     <div class="game-details">
                         <a href="https://www.igdb.com/games/{{ game.slug }}" target="_blank" rel="noopener noreferrer">
                             <h4>{{ game.name }}</h4>
@@ -73,13 +147,9 @@
                         <div class="game-buttons">
                             <form action="{{ url_for('main.add_game_confirm') }}" method="post" class="game-card-form">
                                 <input type="hidden" name="igdb_id" value="{{ game.id }}">
-                                <input type="hidden" name="official_title" value="{{ game.name }}">
-                                {% if game.cover and game.cover.url %}<input type="hidden" name="cover_url" value="{{ game.cover.url.replace('t_thumb', 't_cover_big') }}">{% endif %}
-                                <input type="hidden" name="release_timestamp" value="{{ game.first_release_date }}">
                                 <button type="submit" class="btn btn-sm">Add</button>
-                                
                             </form>
-                            <a href="https://www.igdb.com/games/{{ game.slug }}" target="_blank" class="btn btn-sm btn-pink"><span class="material-symbols-outlined">open_in_new</span></a>
+                            <a href="https://www.igdb.com/games/{{ game.slug }}" target="_blank" class="btn btn-sm btn-lime"><span class="material-symbols-outlined">open_in_new</span></a>
                         </div>
                     </div>
                 </div>
@@ -88,12 +158,11 @@
             {% endfor %}
         </div>
     </details>
-    {% endif %}
 
-    {% if discover %}
+    <!-- Existing: Coming Soon Section -->
     <details class="content-card">
         <summary class="collapsible-header">
-            <h2>Discover: Coming soon</h2>
+            <h2>Discover: Coming Soon</h2>
             <span class="material-symbols-outlined collapsible-icon">keyboard_arrow_down</span>
         </summary>
         <div class="details-content discover-grid">
@@ -103,10 +172,9 @@
                         <img src="{{ game.cover.url.replace('t_thumb', 't_cover_big') }}" alt="{{ game.name }} Cover" class="game-cover-discover">
                     {% else %}
                         <img src="https://via.placeholder.com/150x200.png?text=No+Cover" alt="No Cover Available">
-                    {% endif %}                    
+                    {% endif %}
 
                     <div class="game-details">
-                        <!-- The title is also a link for easy clicking -->
                         <a href="https://www.igdb.com/games/{{ game.slug }}" target="_blank" rel="noopener noreferrer">
                             <h4>{{ game.name }}</h4>
                         </a>
@@ -114,13 +182,9 @@
                         <div class="game-buttons">
                             <form action="{{ url_for('main.add_game_confirm') }}" method="post" class="game-card-form">
                                 <input type="hidden" name="igdb_id" value="{{ game.id }}">
-                                <input type="hidden" name="official_title" value="{{ game.name }}">
-                                {% if game.cover and game.cover.url %}<input type="hidden" name="cover_url" value="{{ game.cover.url.replace('t_thumb', 't_cover_big') }}">{% endif %}
-                                <input type="hidden" name="release_timestamp" value="{{ game.first_release_date }}">
                                 <button type="submit" class="btn btn-sm">Add</button>
-                                
                             </form>
-                            <a href="https://www.igdb.com/games/{{ game.slug }}" target="_blank" class="btn btn-sm btn-pink"><span class="material-symbols-outlined">open_in_new</span></a>
+                            <a href="https://www.igdb.com/games/{{ game.slug }}" target="_blank" class="btn btn-sm btn-lime"><span class="material-symbols-outlined">open_in_new</span></a>
                         </div>
                     </div>
                 </div>
@@ -129,7 +193,7 @@
             {% endfor %}
         </div>
     </details>
-    {% endif %}
+{% endif %}
 
 
 <!-- We will add the JavaScript at the end of the content block -->

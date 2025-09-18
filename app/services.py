@@ -8,6 +8,9 @@ import json
 import time
 from datetime import datetime
 import urllib.parse
+import subprocess
+import sys
+import html
 
 # --- Third-Party Library Imports ---
 import requests
@@ -15,18 +18,15 @@ import praw
 import feedparser
 from qbittorrentapi import Client, exceptions
 from flask import current_app
+import xml.etree.ElementTree as ET
 
 # --- Local Application Imports ---
 from . import db
-from .models import Game, Setting, DiscoverCache
+from .models import Game, Setting, DiscoverCache, AlternativeRelease, AdditionalRelease
 
 # --- NEW: Global cache for the IGDB token ---
 _igdb_access_token = None
 _igdb_token_expires = 0
-    
-# =============================================
-# External API Services (Jackett, IGDB, qBit)
-# =============================================
 
 def search_igdb(search_term):
     """
@@ -63,7 +63,6 @@ def get_igdb_game_details(igdb_id):
     Fetches the full, rich dataset for a SINGLE game from IGDB using its ID.
     """
     try:
-        # --- REFACTORED ---
         headers = _get_igdb_headers()
         
         igdb_url = 'https://api.igdb.com/v4/games'
@@ -114,146 +113,161 @@ def _format_bytes(size_in_bytes):
         n += 1
     return f"{size:.2f} {power_labels[n]}"
 
-def _get_reddit_instance():
-    """
-    Creates and returns an authenticated PRAW Reddit instance.
-    Returns None if credentials are not configured.
-    """
-    settings = get_settings_dict()
-    if not all([settings.get('reddit_client_id'), settings.get('reddit_client_secret'), settings.get('reddit_username'), settings.get('reddit_password')]):
-        current_app.logger.warning("Reddit credentials are not fully configured in settings.")
+def _safe_timestamp_convert(ts):
+    """Safely converts a value to an integer timestamp."""
+    if not ts:
         return None
-        
     try:
-        reddit = praw.Reddit(
-            client_id=settings.get('reddit_client_id'),
-            client_secret=settings.get('reddit_client_secret'),
-            user_agent="Gamearr v1.2 by datsun69",
-            username=settings.get('reddit_username'),
-            password=settings.get('reddit_password')
-        )
-        if reddit.user.me():
-            return reddit
+        return int(ts)
+    except (ValueError, TypeError):
+        return None
+
+def _search_predb_net(search_term):
+    """Helper to search the predb.net API."""
+    current_app.logger.info(f"    -> Checking predb.net for '{search_term}'...")
+    try:
+        safe_search = search_term.replace(':', '')
+        params = {'type': 'search', 'q': safe_search, 'section': 'GAMES', 'sort': 'DESC'}
+        response = requests.get("https://api.predb.net/", params=params, timeout=10)
+        response.raise_for_status()
+        results = response.json().get('data', [])
+        current_app.logger.info(f"       --> Found {len(results)} releases on predb.net.")
+        return [
+            {'release': r.get('release'), 'group': r.get('group'), 'timestamp': _safe_timestamp_convert(r.get('pretime'))}
+            for r in results if r.get('release')
+        ]
     except Exception as e:
-        current_app.logger.error(f"Failed to create Reddit instance: {e}")
+        current_app.logger.error(f"    -> ERROR checking predb.net: {e}")
+        return []
+
+def _search_predb_club(search_term):
+    """Helper to search the predb.club API."""
+    current_app.logger.info(f"    -> Checking predb.club for '{search_term}'...")
+    try:
+        filtered_search = f"{search_term} @cat GAMES"
+        url = f"https://predb.club/api/v1/?q={urllib.parse.quote_plus(filtered_search)}"
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        json_data = response.json()
+        if json_data.get('status') != 'success': return []
+        results = json_data.get('data', {}).get('rows', [])
+        current_app.logger.info(f"       --> Found {len(results)} releases on predb.club.")
+        return [
+            {'release': r.get('name'), 'group': r.get('team'), 'timestamp': _safe_timestamp_convert(r.get('preAt'))}
+            for r in results if r.get('name')
+        ]
+    except Exception as e:
+        current_app.logger.error(f"    -> ERROR checking predb.club: {e}")
+        return []
+
+def _calculate_title_similarity(game_title, release_name):
+    """Calculate similarity score between game title and release name."""
     
-    return None
-
-def _parse_reddit_section(submission_text, section_title):
-    """
-    Parses a specific section of a Reddit submission's markdown text to find release names and groups.
-    """
-    releases = []
-    try:
-        sections = re.split(r'\*\*([^*]+)\*\*', submission_text)
-        normalized_section_title = section_title.strip().lower()
-        
-        found_index = -1
-        for i, header in enumerate(sections):
-            if i % 2 == 1 and header.strip().lower() == normalized_section_title:
-                found_index = i
-                break
-
-        if found_index != -1 and (found_index + 1) < len(sections):
-            section_content = sections[found_index + 1]
-            pattern = re.compile(r"^\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|", re.MULTILINE)
-            matches = pattern.findall(section_content)
-            for game_name, group_name in matches:
-                releases.append((game_name.strip(), group_name.strip()))
-    except Exception as e:
-        current_app.logger.error(f"Failed during _parse_reddit_section for title '{section_title}': {e}")
-    return releases
-
-def check_source_reddit(game_title):
-    """
-    Checks recent Reddit posts for a new, full game release by parsing ONLY the 'Daily release' section.
-    """
-    current_app.logger.info(f"    -> Checking Reddit for '{game_title}'...")
-    reddit = _get_reddit_instance()
-    if not reddit:
-        current_app.logger.warning("    -> Reddit credentials not configured. Skipping check.")
-        return None, None
-        
-    try:
-        redditor = reddit.redditor('EssenseOfMagic')
-        normalized_title = game_title.replace(':', '').lower()
-        title_keywords = set(normalized_title.split())
-        BLOCKED_KEYWORDS = {'TRAINER', 'UPDATE', 'DLC', 'PATCH', 'CRACKFIX', 'MACOS', 'LINUX'}
-
-        for submission in redditor.submissions.new(limit=100):
-            if "Daily Releases" not in submission.title:
-                continue
-
-            daily_releases = _parse_reddit_section(submission.selftext, "Daily release")
-
-            for game_name, group_name in daily_releases:
-                cleaned_reddit_title_set = set(game_name.strip().replace('.', ' ').replace('_', ' ').lower().split())
-                
-                if not title_keywords.issubset(cleaned_reddit_title_set):
-                    continue
-                if any(blocked_word in {word.upper() for word in cleaned_reddit_title_set} for blocked_word in BLOCKED_KEYWORDS):
-                    continue
-
-                current_app.logger.info(f"       --> Found Reddit match: {game_name} by {group_name}")
-                return game_name, group_name
-    except Exception as e:
-        current_app.logger.error(f"    -> ERROR: Reddit check failed: {e}")
+    # First replace dots, underscores, and dashes with spaces, THEN remove other punctuation
+    normalized_game = re.sub(r'[._-]', ' ', game_title)
+    normalized_release = re.sub(r'[._-]', ' ', release_name)
     
-    return None, None
-
-
-def check_reddit_deep_search(game_title):
-    """
-    Performs a deep search of Reddit for a historical, full game release.
-    This version uses wide-net parsing (like the original) and robust keyword matching.
-    """
-    current_app.logger.info(f"    -> Performing Reddit deep search for '{game_title}'...")
-    reddit = _get_reddit_instance()
-    if not reddit:
-        current_app.logger.warning("    -> Reddit credentials not configured. Skipping deep search.")
-        return None, None
-
-    try:
-        # Normalize the title for the search query to improve finding the post
-        normalized_search_term = re.sub(r"[:']", "", game_title)
-        
-        target_subreddit = "CrackWatch"
-        search_query = f'author:EssenseOfMagic "{normalized_search_term}"'
-        subreddit = reddit.subreddit(target_subreddit)
-        search_results = subreddit.search(search_query, sort='new', limit=100)
-
-        # Use the original title to create a precise set of keywords for matching
-        normalized_title_for_keywords = game_title.replace(':', '').lower()
-        title_keywords = set(normalized_title_for_keywords.split())
-        BLOCKED_KEYWORDS = {'TRAINER', 'UPDATE', 'DLC', 'PATCH', 'CRACKFIX', 'MACOS', 'LINUX'}
-        
-        for submission in search_results:
-            if "daily releases" not in submission.title.lower():
-                continue
-
-            # --- THIS IS THE FIX ---
-            # We revert to the original, more effective method of scanning the ENTIRE post body.
-            # We do NOT use the strict _parse_reddit_section helper here.
-            pattern = re.compile(r"^\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|", re.MULTILINE)
-            matches = pattern.findall(submission.selftext)
-
-            for game_name, group_name in matches:
-                # Use the robust keyword subset check for accurate matching
-                cleaned_reddit_title_set = set(game_name.strip().replace('.', ' ').replace('_', ' ').lower().split())
-                if not title_keywords.issubset(cleaned_reddit_title_set):
-                    continue
-
-                # Still perform the critical check for blocked words
-                if any(blocked_word in {word.upper() for word in cleaned_reddit_title_set} for blocked_word in BLOCKED_KEYWORDS):
-                    continue
-
-                current_app.logger.info(f"       --> Found historical match: {game_name.strip()} by {group_name.strip()}")
-                return game_name.strip(), group_name.strip()
-
-    except Exception as e:
-        current_app.logger.error(f"    -> ERROR: Reddit deep search failed: {e}")
+    # Now remove remaining punctuation and split into words
+    game_words = set(re.sub(r'[^\w\s]', '', normalized_game.lower()).split())
+    release_words = set(re.sub(r'[^\w\s]', '', normalized_release.lower()).split())
     
-    return None, None
+    # Remove common gaming words that don't affect matching
+    common_words = {'repack', 'multi', 'multilingual', 'campaign', 'kampagne', 
+                   'complete', 'edition', 'goty', 'deluxe', 'ultimate', 'directors',
+                   'cut', 'enhanced', 'definitive', 'special', 'collectors', 
+                   '2022', '2023', '2024', '2025', 'multi2', 'multi8', 'multi4',
+                   'xx', 'x'}
+    release_words -= common_words
+    
+    # Calculate overlap score
+    if not game_words or not release_words:
+        return 0
+    
+    overlap = len(game_words.intersection(release_words))
+    return overlap / len(game_words)
+
+def _refine_search_term(raw_release_name):
+    """
+    Cleans a raw release name into a standardized search term by replacing
+    common separators with spaces.
+    Example: 'METAL_GEAR_SOLID_DELTA_SNAKE_EATER-FLT' -> 'METAL GEAR SOLID DELTA SNAKE EATER-FLT'
+    """
+    if not raw_release_name:
+        return ""
+    
+    # Replace common separators (underscores, periods) with spaces
+    cleaned = raw_release_name.replace('.', ' ').replace('_', ' ')
+    
+    # Collapse multiple spaces into one and trim whitespace from the ends
+    return re.sub(r'\s+', ' ', cleaned).strip()
+
+def _is_valid_game_match(game_title, release_name, min_similarity=0.7):
+    """Check if release name is a valid match for the game title."""
+    similarity = _calculate_title_similarity(game_title, release_name)
+    
+    # Special handling for numbered sequels (II, III, IV, etc.)
+    game_roman = re.search(r'\b(II|III|IV|V|VI|VII|VIII|IX|X)\b', game_title)
+    release_roman = re.search(r'\b(II|III|IV|V|VI|VII|VIII|IX|X)\b', release_name)
+    
+    if game_roman and release_roman:
+        # For numbered sequels, roman numerals must match exactly
+        if game_roman.group(1) != release_roman.group(1):
+            return False
+    elif game_roman and not release_roman:
+        # Game has roman numeral but release doesn't - likely not a match
+        return False
+        
+    return similarity >= min_similarity
+
+def check_source_xrel(search_term):
+    """Checks the xrel.to API for releases."""
+    current_app.logger.info(f"    -> Checking xrel.to for '{search_term}'...")
+    found_releases = []
+    try:
+        safe_search = search_term.replace(':', '')
+        url = f"https://api.xrel.to/v2/search/releases.xml?q={urllib.parse.quote_plus(safe_search)}&scene=1&p2p=1"
+        response = requests.get(url, timeout=15)
+        response.raise_for_status()
+        root = ET.fromstring(response.content)
+        for rls in root.findall('.//rls') + root.findall('.//p2p_rls'):
+            dirname = rls.find('dirname')
+            group = rls.find('.//group/name')
+            pub_time = rls.find('pub_time')
+            ts = _safe_timestamp_convert(pub_time.text if pub_time is not None else None)
+            if dirname is not None and group is not None and ts:
+                found_releases.append({'release': dirname.text, 'group': group.text, 'timestamp': ts})
+        current_app.logger.info(f"       --> Found {len(found_releases)} releases on xrel.to.")
+        return found_releases
+    except Exception as e:
+        current_app.logger.error(f"    -> ERROR xrel.to: {e}")
+        return []
+        
+def check_source_fitgirl(game_title):
+    """Checks the FitGirl site for a repack of a specific game."""
+    try:
+        current_app.logger.info(f"    -> Checking FitGirl for '{game_title}'...")
+        base_url = "https://fitgirl-repacks.site/"
+        encoded_search = urllib.parse.quote_plus(game_title)
+        
+        response = requests.get(f"{base_url}?s={encoded_search}", timeout=15)
+        response.raise_for_status()
+
+        if "Sorry, but nothing matched your search terms." in response.text:
+            return None
+        
+        matches = re.findall(r'<h1 class="entry-title"><a href=".+?" rel="bookmark">(.+?)</a></h1>', response.text)
+        
+        for found_title in matches:
+            # Use the improved matching logic instead of simple substring check
+            if _is_valid_game_match(game_title, found_title, min_similarity=0.8):
+                current_app.logger.info(f"       --> Found FitGirl match: {found_title}")
+                return found_title
+        
+        current_app.logger.info(f"       --> No valid FitGirl matches found after similarity check")
+        return None
+    except Exception as e:
+        current_app.logger.error(f"    -> ERROR: FitGirl check failed: {e}")
+        return None
 
 def search_jackett(game_title):
     """
@@ -384,11 +398,6 @@ def add_to_qbittorrent(magnet_link):
         current_app.logger.error(f"An unexpected qBittorrent error occurred: {e}")
         return None
 
-# =============================================
-# P2P Source Checkers
-# =============================================
-# (The primary check_source_reddit is already defined above, the duplicate has been removed)
-
 def check_source_rss(feed_url, game_title):
     try:
         feed = feedparser.parse(feed_url)
@@ -406,87 +415,181 @@ def check_source_rss(feed_url, game_title):
         current_app.logger.info(f"    ERROR: RSS feed check for '{feed_url}' failed: {e}")
     return None
 
-
-# =============================================
-# The Main Release Finding Engine
-# =============================================
-
-def find_release_for_game(game_id):
+def process_all_releases_for_game(game_id):
     """
-    The definitive, unified search engine for finding a BASE GAME release.
+    The single, unified engine to find, categorize, and process ALL releases 
+    (base games, add-ons, etc.) for a given game.
     """
     game = Game.query.get(game_id)
     if not game:
-        current_app.logger.error(f"find_release_for_game called with invalid game_id: {game_id}")
-        return False
-        
-    current_app.logger.info(f"--> Processing '{game.official_title}'")
-    
-    # --- TIER 1: SCENE CHECK (predb.net) ---
-    try:
-        sanitized_title = ''.join(e for e in game.official_title if e.isalnum() or e.isspace()).strip()
-        params = {'type': 'search', 'q': sanitized_title, 'section': 'GAMES', 'sort': 'DESC'}
-        BLOCKED_KEYWORDS = {'TRAINER', 'UPDATE', 'DLC', 'PATCH', 'CRACKFIX', 'MACOS', 'LINUX', 'NSW', 'PS5', 'PS4', 'XBOX'}
-        response = requests.get("https://api.predb.net/", params=params, timeout=10)
-        response.raise_for_status()
-        results = response.json().get('data', [])
+        current_app.logger.error(f"Unified engine called with invalid game_id: {game_id}")
+        return
 
-        if results:
-            current_app.logger.info(f"    -> api.predb.net (GAMES section) returned {len(results)} results.")
-            normalized_title = game.official_title.replace(':', '').lower()
-            title_keywords = set(normalized_title.split())
+    current_app.logger.info(f"--> Starting UNIFIED release scan for '{game.official_title}'")
+
+    # --- ENGINE CONSTANTS ---
+    MOVIE_KEYWORDS = {'BDRIP', 'BLURAY', 'HDTV', 'X264', 'X265', 'DTSHD', 'DVDRIP'}
+    PLATFORM_KEYWORDS = {'MACOS', 'LINUX', 'NSW', 'PS4', 'PS5', 'XBOX', 'WII', 'NGC', 'PS2DVD'}
+    TYPE_BLOCKED_KEYWORDS = {'UPDATE', 'DLC', 'PATCH', 'CRACKFIX', 'TRAINER'}
+    REPACK_GROUPS = {'FITGIRL', 'DODI', 'ELAMIGOS', 'KAOSKREW', 'MASQUERADE'}
+    TIER_ORDER = {'Scene': 2, 'Repack': 1, 'P2P': 0}
+
+    # --- HELPER FUNCTIONS ---
+    def _calculate_relevancy_score(game_release_date, release_timestamp):
+        if not game_release_date or not release_timestamp: return 0
+        try:
+            game_date = datetime.strptime(game_release_date, '%Y-%m-%d')
+            release_date = datetime.fromtimestamp(int(release_timestamp))
+            delta_days = (release_date - game_date).days
             
-            for release in results:
-                release_name = release.get('release', '')
-                release_keyword_set = set(release_name.upper().replace('.', ' ').replace('_', ' ').replace('-', ' ').split())
-                
-                if title_keywords.issubset({word.lower() for word in release_keyword_set}) and not any(word in release_keyword_set for word in BLOCKED_KEYWORDS):
-                    db_nfo_path, db_nfo_img_path = fetch_and_save_nfo(release_name)
-                    game.status = 'Definitely Cracked'
-                    game.release_name = release_name
-                    game.release_group = release.get('group')
-                    game.nfo_path = db_nfo_path
-                    game.nfo_img_path = db_nfo_img_path
-                    game.needs_content_scan = True
-                    db.session.commit()
-                    current_app.logger.info(f"    SUCCESS! Found Scene release: {release_name}")
-                    return True
+            if delta_days < -30: return -1000 # Too early, likely fake
+            
+            # More flexible timing for different scenarios:
+            if delta_days <= 90:    return 200  # Very good - within 3 months
+            if delta_days <= 365:   return 150  # Good - within 1 year  
+            if delta_days <= 730:   return 100  # OK - within 2 years
+            if delta_days <= 1095:  return 50   # Acceptable - within 3 years (heavy DRM)
+            if delta_days <= 1460:  return 25   # Late but possible - within 4 years
+            
+            return -1000 # Too late, probably for a different game/remake
+        except Exception:
+            return 0
     
-    except Exception as e:
-        current_app.logger.error(f"    ERROR checking predb.net: {e}")
+    def _detect_type(release_name, original_type):
+        if any(rg in release_name.upper() for rg in REPACK_GROUPS):
+            return 'Repack'
+        return original_type
 
-    # --- TIER 2: P2P RECENT CHECKS ---
-    current_app.logger.info("    No scene release found. Checking P2P sources...")
-    
-    recent_release_name, recent_group_name = check_source_reddit(game.official_title)
-    if recent_release_name:
-        current_app.logger.info(f"    SUCCESS! Found recent P2P release via Reddit: {recent_release_name}")
-        game.status = 'Probably Cracked (P2P)'
-        game.release_name = recent_release_name
-        game.release_group = recent_group_name
-        game.needs_content_scan = True
-        db.session.commit()
-        return True
-    
-    # --- TIER 3: P2P HISTORICAL DEEP SEARCH ---
-    current_app.logger.info("    No recent releases found. Performing deep search on Reddit...")
-    deep_release_name, deep_group_name = check_reddit_deep_search(game.official_title)
-    if deep_release_name:
-        current_app.logger.info(f"    SUCCESS! Found historical P2P release: {deep_release_name}")
-        game.status = 'Probably Cracked (P2P)'
-        game.release_name = deep_release_name
-        game.release_group = deep_group_name
-        game.needs_content_scan = True
-        db.session.commit()
-        return True
+    def _normalize_title(title):
+        t = re.sub(r'[_.:-]', ' ', title.lower())
+        return re.sub(r'\s+', ' ', t).strip()
 
-    # --- Final Step ---
-    current_app.logger.info(f"    No release found for '{game.official_title}' after all checks.")
-    if game.status == 'Processing':
-        game.status = 'Monitoring'
+    # --- STEP 1: GATHER EVERYTHING FROM ALL SOURCES ---
+    all_releases = {}
+    for r in _search_predb_club(game.official_title):
+        if r['release']: all_releases[r['release']] = {'source': r['group'] or 'Scene', 'type': 'Scene', 'timestamp': r['timestamp']}
+    for r in _search_predb_net(game.official_title):
+        if r['release']: all_releases.setdefault(r['release'], {'source': r['group'] or 'Scene', 'type': 'Scene', 'timestamp': r['timestamp']})
+    for r in check_source_xrel(game.official_title):
+        if r['release']: all_releases.setdefault(r['release'], {'source': r['group'] or 'P2P', 'type': 'P2P', 'timestamp': r['timestamp']})
+    
+    fitgirl_release = check_source_fitgirl(game.official_title)
+    if fitgirl_release:
+        all_releases.setdefault(fitgirl_release, {'source': 'FitGirl', 'type': 'Repack', 'timestamp': None})
+    
+    if not all_releases:
+        current_app.logger.info(f"    -> No potential releases found for '{game.official_title}'.")
+        if game.status == 'Processing': game.status = 'Monitoring'
         db.session.commit()
+        return
+
+    # --- STEP 2: CATEGORIZE & FILTER ---
+    current_app.logger.info(f"    -> Found {len(all_releases)} total releases. Categorizing and filtering...")
+    base_game_candidates = []
+    add_ons = []
+
+    # DEBUG: Log all releases first
+    current_app.logger.info(f"    -> DEBUG: All releases found:")
+    for name, data in all_releases.items():
+        current_app.logger.info(f"         '{name}' - {data}")
+
+    for name, data in all_releases.items():
+        clean_name = html.unescape(name)
+        upper_words = set(clean_name.upper().replace('.', ' ').replace('_', ' ').replace('-', ' ').split())
         
-    return False
+        current_app.logger.info(f"    -> DEBUG: Processing '{clean_name}'")
+        
+        # Categorize first
+        if not TYPE_BLOCKED_KEYWORDS.isdisjoint(upper_words):
+            current_app.logger.info(f"    -> DEBUG: '{clean_name}' categorized as add-on (blocked keywords)")
+            add_ons.append({'release_name': clean_name, **data})
+            continue
+
+        # Filter base games
+        if not MOVIE_KEYWORDS.isdisjoint(upper_words):
+            current_app.logger.info(f"    -> DEBUG: '{clean_name}' filtered out (movie keywords)")
+            continue
+        
+        # Use improved matching instead of simple substring check
+        if not _is_valid_game_match(game.official_title, clean_name):
+            current_app.logger.info(f"    -> DEBUG: '{clean_name}' filtered out (similarity too low)")
+            continue
+            
+        # Score and finalize type for valid base games
+        data['score'] = _calculate_relevancy_score(game.release_date, data.get('timestamp'))
+        if data['score'] < 0:
+            current_app.logger.info(f"    -> DEBUG: '{clean_name}' filtered out (bad relevancy score: {data['score']})")
+            continue
+            
+        current_app.logger.info(f"    -> DEBUG: '{clean_name}' ACCEPTED as base game candidate (score: {data['score']})")
+        data['release_name'] = clean_name
+        data['type'] = _detect_type(clean_name, data.get('type', 'P2P'))
+        data['is_pc'] = PLATFORM_KEYWORDS.isdisjoint(upper_words)
+        base_game_candidates.append(data)
+
+    # --- STEP 3: PROCESS BASE GAMES ---
+    if not base_game_candidates:
+        current_app.logger.info(f"    -> No valid BASE GAME releases found after filtering.")
+    else:
+        # Sort to find the best primary release (PC first, then score, then tier)
+        sorted_games = sorted(
+            base_game_candidates,
+            key=lambda item: (item['is_pc'], item['score'], TIER_ORDER.get(item['type'], 0)),
+            reverse=True
+        )
+        
+        primary_release = sorted_games[0]
+        alternative_releases = sorted_games[1:]
+
+        # Update Game with primary release
+    
+        if primary_release['type'] == 'Scene':
+            game.status = 'Cracked (Scene)'
+        else: # This covers 'Repack' and 'P2P'
+            game.status = 'Cracked (P2P)'
+
+        game.release_name = primary_release['release_name']
+        game.release_group = primary_release['source']
+        game.nfo_path, game.nfo_img_path = fetch_and_save_nfo(primary_release['release_name'])
+        current_app.logger.info(f"    SUCCESS! Assigning primary release: '{game.release_name}'")
+
+        # Save all other valid releases as Alternatives
+        AlternativeRelease.query.filter_by(game_id=game.id).delete()
+        for alt_data in alternative_releases:
+            nfo_path, nfo_img_path = fetch_and_save_nfo(alt_data['release_name'])
+            alt_release = AlternativeRelease(
+                release_name=alt_data['release_name'], 
+                source=alt_data['source'], 
+                game_id=game.id,
+                nfo_path=nfo_path,
+                nfo_img_path=nfo_img_path
+            )
+            db.session.add(alt_release)
+        current_app.logger.info(f"    -> Saved {len(alternative_releases)} alternative releases.")
+
+    # --- STEP 4: PROCESS ADD-ONS ---
+    if not add_ons:
+        current_app.logger.info(f"    -> No valid ADD-ON releases found.")
+    else:
+        existing_add_ons = {r.release_name for r in AdditionalRelease.query.filter_by(game_id=game.id).all()}
+        new_add_on_count = 0
+        for item in add_ons:
+            if item['release_name'] not in existing_add_ons:
+                release_type = parse_additional_release_info(item['release_name'])
+                if release_type: # Only save if it's a valid type
+                    new_add_on = AdditionalRelease(
+                        release_name=item['release_name'], 
+                        release_type=release_type, 
+                        source=item.get('source'),
+                        game_id=game.id
+                    )
+                    db.session.add(new_add_on)
+                    new_add_on_count += 1
+        current_app.logger.info(f"    -> Saved {new_add_on_count} new add-on releases.")
+    
+    game.needs_release_check = False
+    db.session.commit()
+    current_app.logger.info(f"--> Finished UNIFIED release scan for '{game.official_title}'")
 
 def fetch_and_save_nfo(release_name):
     """
@@ -557,10 +660,6 @@ def parse_additional_release_info(release_name):
         if f' {keyword} ' in name_upper or name_upper.endswith(f' {keyword}'):
             return type_name
     return None
-
-# =============================================
-# Library scan
-# =============================================
 
 def scan_library_folder():
     """
@@ -634,10 +733,6 @@ def _clean_release_name(release_name):
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     return cleaned
 
-# =============================================
-# Discover
-# =============================================
-
 def _get_igdb_headers():
     """
     A private helper that gets and CACHES the required auth headers for any IGDB API call.
@@ -671,42 +766,99 @@ def _get_igdb_headers():
 
 def update_discover_lists():
     """
-    Fetches and caches IGDB discover lists.
+    Fetches and caches high-quality IGDB discover lists using a smarter filter for anticipated games.
     """
-    current_app.logger.info("--- Starting daily Discover list update (using API v4) ---")
+    current_app.logger.info("--- Starting Discover list update (using API v4) ---")
     try:
         headers = _get_igdb_headers()
-        api_url = "https://api.igdb.com/v4/games"
         now_timestamp = int(time.time())
 
-        anticipated_query = f'fields name, cover.url, first_release_date, slug; where first_release_date > {now_timestamp} & platforms = 6 & hypes > 0; sort hypes desc; limit 12;'
-        response_anticipated = requests.post(api_url, headers=headers, data=anticipated_query, timeout=20)
-        response_anticipated.raise_for_status()
-        anticipated_games = response_anticipated.json()
+        popularity_api_url = "https://api.igdb.com/v4/popularity_primitives"
+        games_api_url = "https://api.igdb.com/v4/games"
+        
+        CANDIDATE_LIMIT = 200 
 
+        # --- "MOST ANTICIPATED" LOGIC (Final Version) ---
+        anticipated_games = []
+        try:
+            current_app.logger.info("    -> Fetching 'Most Anticipated' list...")
+            pop_query = f'fields game_id, value; where popularity_type = 2; sort value desc; limit {CANDIDATE_LIMIT};'
+            pop_response = requests.post(popularity_api_url, headers=headers, data=pop_query, timeout=20)
+            pop_response.raise_for_status()
+            
+            ids = [item['game_id'] for item in pop_response.json() if 'game_id' in item]
+            current_app.logger.info(f"       - Found {len(ids)} potential anticipated game IDs.")
+
+            if ids:
+                ids_string = ",".join(map(str, ids))
+                # --- THE FINAL FIX: Include games where platforms are unannounced ---
+                details_query = (
+                    f'fields name, cover.url, first_release_date, slug; '
+                    f'where id = ({ids_string}) & first_release_date > {now_timestamp} & (platforms = (6) | platforms = null); limit {CANDIDATE_LIMIT};'
+                )
+                details_response = requests.post(games_api_url, headers=headers, data=details_query, timeout=20)
+                details_response.raise_for_status()
+                
+                game_map = {game['id']: game for game in details_response.json()}
+                anticipated_games = [game_map[gid] for gid in ids if gid in game_map][:12]
+                current_app.logger.info(f"       - Built list with {len(anticipated_games)} final games.")
+        except Exception as e:
+            current_app.logger.error(f"    -> Failed to build 'Most Anticipated' list: {e}")
+
+        # --- "POPULAR RIGHT NOW" LOGIC (No changes needed here) ---
+        popular_now_games = []
+        try:
+            current_app.logger.info("    -> Fetching 'Popular Right Now' list...")
+            pop_query = f'fields game_id, value; where popularity_type = 3; sort value desc; limit {CANDIDATE_LIMIT};'
+            pop_response = requests.post(popularity_api_url, headers=headers, data=pop_query, timeout=20)
+            pop_response.raise_for_status()
+            
+            ids = [item['game_id'] for item in pop_response.json() if 'game_id' in item]
+            current_app.logger.info(f"       - Found {len(ids)} potential popular game IDs.")
+            
+            if ids:
+                ids_string = ",".join(map(str, ids))
+                details_query = (
+                    f'fields name, cover.url, slug, aggregated_rating; '
+                    f'where id = ({ids_string}) & first_release_date < {now_timestamp} & platforms = (6); limit {CANDIDATE_LIMIT};'
+                )
+                details_response = requests.post(games_api_url, headers=headers, data=details_query, timeout=20)
+                details_response.raise_for_status()
+                
+                game_map = {game['id']: game for game in details_response.json()}
+                popular_now_games = [game_map[gid] for gid in ids if gid in game_map][:12]
+                current_app.logger.info(f"       - Built list with {len(popular_now_games)} final games.")
+        except Exception as e:
+            current_app.logger.error(f"    -> Failed to build 'Popular Right Now' list: {e}")
+
+        # --- (The rest of the queries remain the same) ---
         ninety_days_from_now = now_timestamp + (90 * 24 * 60 * 60)
-        coming_soon_query = f'fields name, cover.url, first_release_date, slug; where first_release_date > {now_timestamp} & first_release_date < {ninety_days_from_now} & platforms = 6; sort first_release_date asc; limit 12;'
-        response_coming_soon = requests.post(api_url, headers=headers, data=coming_soon_query, timeout=20)
-        response_coming_soon.raise_for_status()
+        coming_soon_query = f'fields name, cover.url, first_release_date, slug; where first_release_date > {now_timestamp} & first_release_date < {ninety_days_from_now} & platforms = (6); sort first_release_date asc; limit 12;'
+        response_coming_soon = requests.post(games_api_url, headers=headers, data=coming_soon_query, timeout=20)
         coming_soon_games = response_coming_soon.json()
 
-        ninety_days_ago = now_timestamp - (90 * 24 * 60 * 60)
-        top_reviewed_query = f'fields name, cover.url, first_release_date, slug, aggregated_rating, aggregated_rating_count; where first_release_date < {now_timestamp} & first_release_date > {ninety_days_ago} & platforms = 6 & aggregated_rating > 70; sort aggregated_rating desc; limit 12;'
-        response_top_reviewed = requests.post(api_url, headers=headers, data=top_reviewed_query, timeout=20)
-        response_top_reviewed.raise_for_status()
+        one_year_ago = now_timestamp - (365 * 24 * 60 * 60)
+        top_reviewed_query = (
+            f'fields name, cover.url, first_release_date, slug, total_rating, total_rating_count; ' # Use total_rating
+            f'where first_release_date < {now_timestamp} & first_release_date > {one_year_ago} '    # Look back one year
+            f'& platforms = (6) & total_rating > 75 & total_rating_count > 5; '                   # Add rating count filter
+            f'sort total_rating desc; limit 12;'                                                     # Sort by total_rating
+        )
+        response_top_reviewed = requests.post(games_api_url, headers=headers, data=top_reviewed_query, timeout=20)
         top_reviewed_games = response_top_reviewed.json()
         
+        # Cache all four lists in the database
         lists_to_cache = {
-            'anticipated': anticipated_games, 'coming_soon': coming_soon_games, 'top_reviewed': top_reviewed_games
+            'anticipated': anticipated_games,
+            'popular_now': popular_now_games,
+            'coming_soon': coming_soon_games,
+            'top_reviewed': top_reviewed_games
         }
 
         for name, content in lists_to_cache.items():
             cache_item = DiscoverCache.query.get(name)
-            if cache_item:
-                cache_item.content = json.dumps(content)
-            else:
-                cache_item = DiscoverCache(list_name=name, content=json.dumps(content))
-                db.session.add(cache_item)
+            if cache_item: cache_item.content = json.dumps(content)
+            else: db.session.add(DiscoverCache(list_name=name, content=json.dumps(content)))
         
         db.session.commit()
         current_app.logger.info("--- Finished Discover list update ---")

@@ -3,6 +3,29 @@
 {% block title %}Library - Gamerr{% endblock %}
 
 {% block content %}
+
+<div class="row mb-3">
+      <form method="GET" action="{{ url_for('main.index') }}" class="form-inline">
+        <div class="form-group">
+          <label for="filter_status">Status:</label>
+          <select name="filter_status" id="filter_status" class="form-control" onchange="this.form.submit()">
+            <option value="all" {% if current_filter == 'all' %}selected{% endif %}>All Statuses</option>
+            {% for status in all_statuses %}
+              <option value="{{ status }}" {% if status == current_filter %}selected{% endif %}>{{ status }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="sort_by">Sort By:</label>
+          <select name="sort_by" id="sort_by" class="form-control" onchange="this.form.submit()">
+            <option value="id_desc" {% if current_sort == 'id_desc' %}selected{% endif %}>Recently Added</option>
+            <option value="title_asc" {% if current_sort == 'title_asc' %}selected{% endif %}>Title (A-Z)</option>
+            <option value="release_date_desc" {% if current_sort == 'release_date_desc' %}selected{% endif %}>Release Date (Newest)</option>
+          </select>
+        </div>
+      </form>
+  </div>
+
 <ul class="game-list">
     {% for game in games %}
         <!-- The LI is the main container with all data attributes -->

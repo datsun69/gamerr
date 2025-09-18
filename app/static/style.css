@@ -213,9 +213,20 @@ footer {
 }
 
 .game-detail-header {
-    display: flex;
     flex-direction: row;
     gap: 20px;
+    align-items: flex-start;
+}
+
+.game-detail-cover {
+    width: 250px; 
+    flex-shrink: 0; 
+    height: auto; 
+    border-radius: 4px; /* Optional: for aesthetics */
+}
+
+.game-detail-info {
+    flex-grow: 1; 
 }
 
 .game-details-action-buttons {display: flex; gap: 20px;}
@@ -429,6 +440,8 @@ button[type="submit"] { text-wrap: nowrap; }
     .game-cover { height: 260px; }
     .game-details { padding: 0.5rem; }
     .discover-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+    .nomobile {display: none;}
+    .game-detail-header {flex-direction: column;}
 
     /* Force details to be visible on mobile */
     .game-details small, .game-details .game-buttons {

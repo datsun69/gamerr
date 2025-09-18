@@ -10,8 +10,7 @@ import time
 
 from . import db
 from .models import Game, Setting, SearchTask, DiscoverCache
-from .services import search_jackett, add_to_qbittorrent, get_qbit_client, process_library_scan, get_igdb_game_details
-from .jobs import check_single_game_release
+from .services import search_jackett, add_to_qbittorrent, get_qbit_client, process_library_scan, get_igdb_game_details, _refine_search_term
 
 main = Blueprint('main', __name__)
 
@@ -45,22 +44,35 @@ def format_seconds(seconds):
 # Main Routes
 @main.route('/')
 def index():
-    
-    # 1. Get the page number from the URL, e.g., /?page=2. Default to page 1.
+    query = Game.query
+
+    filter_status = request.args.get('filter_status', 'all')
+    sort_by = request.args.get('sort_by', 'id_desc')
     page = request.args.get('page', 1, type=int)
-    
-    # 2. Instead of .all(), use .paginate().
-    #    This creates a pagination object containing the games for the current page
-    #    as well as info for building the navigation links.
-    pagination = Game.query.order_by(Game.id.desc()).paginate(
-        page=page, per_page=50, error_out=False
-    )
-    
-    # 3. The actual list of games for the current page is in pagination.items
+
+    if filter_status and filter_status != 'all':
+        query = query.filter_by(status=filter_status)
+
+    if sort_by == 'title_asc':
+        query = query.order_by(Game.official_title.asc())
+    elif sort_by == 'release_date_desc':
+        query = query.order_by(Game.release_date.desc())
+    else: # Default case
+        query = query.order_by(Game.id.desc())
+        
+    all_statuses = [s[0] for s in db.session.query(Game.status).distinct()]
+
+    pagination = query.paginate(page=page, per_page=25, error_out=False) # Using 25 per page is a good number
     games = pagination.items
     
-    # 4. Pass the *pagination object itself* to the template as well.
-    return render_template('index.html', games=games, pagination=pagination)
+    return render_template(
+        'index.html', 
+        games=games, 
+        pagination=pagination,
+        all_statuses=all_statuses,
+        current_filter=filter_status,
+        current_sort=sort_by
+    )
 
 # Add/Search Game Routes
 @main.route('/add', methods=['GET', 'POST'])
@@ -101,24 +113,29 @@ def add_game_confirm():
         flash("Invalid request. No game ID provided.", "error")
         return redirect(url_for('main.add_game_search'))
 
+    # --- Duplicate Check ---
     exists = Game.query.filter_by(igdb_id=igdb_id).first()
     if exists:
         flash(f"'{exists.official_title}' is already in your library.", "info")
         return redirect(url_for('main.index'))
 
+    # --- Fetch Full Details from API ---
     game_details = get_igdb_game_details(igdb_id)
     if not game_details:
         flash("Could not fetch full details for that game from IGDB.", "error")
         return redirect(url_for('main.add_game_search'))
 
+    # --- Create the New Game ---
     new_game = Game(**game_details, status='Processing')
     
+    # --- THIS IS THE CORRECT LOGIC ---
+    # Instead of starting a thread, we set our flag to True.
+    # This officially adds the task to our reliable database "queue".
     new_game.needs_release_check = True
     
     db.session.add(new_game)
     db.session.commit()
 
-    # 2. Update the flash message to be more accurate.
     flash(f"'{new_game.official_title}' has been added and a release check has been queued.", "success")
     
     return redirect(url_for('main.index'))
@@ -165,16 +182,26 @@ def library_import_confirm():
 def interactive_search(game_id):
     game = Game.query.get_or_404(game_id)
     
-    search_term = (
-        request.args.get('q') or 
-        request.form.get('search_term') or 
-        game.release_name or 
-        game.official_title
-    )
-    # --- END OF FIX ---
+    # 1. Determine the initial, potentially "raw" term from the request
+    initial_term = ""
+    if request.method == 'POST':
+        # If the form was submitted, its value is the highest priority.
+        initial_term = request.form.get('search_term', '').strip()
+    else: 
+        # For a GET request, use the URL param or fall back to the game's release name.
+        initial_term = (
+            request.args.get('q') or 
+            game.release_name or 
+            game.official_title
+        )
     
+    # 2. Refine the term ONCE. This is the single source of truth now.
+    search_term = _refine_search_term(initial_term)
+    
+    # 3. Use the single refined term for both the Jackett search and for populating the template.
     jackett_results = search_jackett(search_term)
     return render_template('search.html', game=game, results=jackett_results, search_term=search_term)
+
 
 @main.route('/download', methods=['POST'])
 def download():

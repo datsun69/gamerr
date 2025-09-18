@@ -114,7 +114,8 @@ This project is actively being developed. The current roadmap includes:
     -   [ ] Redact secrets (passwords, API keys) in the UI.
     -   [ ] Add robust input validation using Flask-WTF.
 -   [ ] **Advanced Release Management:**
-    -   [ ] "Related Releases" engine to track and manage updates, patches, and DLCs.
+    -   [x] "Related Releases" engine to track and manage updates, patches, and DLCs.
+    -   [ ] "Alternative Base Game Releases"
     -   [ ] "Upscale" feature to find better-quality releases for already-imported games.
 
 ### Limitations

@@ -8,8 +8,6 @@
     <div class="game-detail-header card">
         <img src="https:{{ game.cover_url }}" alt="Cover for {{ game.official_title }}" class="game-detail-cover">
 
-
-
         <div class="status-badge-container">
             <span class="status-badge
                 {% if 'definitely cracked' in game.status.lower() %}status-cracked
@@ -27,7 +25,7 @@
                 {% if game.critic_score > 0 %}<span class="pill"><span class="material-symbols-outlined">star</span>Critic Score: {{ game.critic_score }}</span>{% endif %}
                 {% if game.user_score > 0 %}<span class="pill"><span class="material-symbols-outlined">person</span>User Score: {{ game.user_score }}</span>{% endif %}
             </div>
-            <p class="game-summary">{{ game.summary }}</p>
+            <p class="game-summary nomobile">{{ game.summary }}</p>
             <div class="metadata-pills">
                 {% for genre in game.genres.split(',') %}<span class="pill pill-genre">{{ genre.strip() }}</span>{% endfor %}
             </div>
@@ -52,27 +50,54 @@
     </div>
 
     <!-- Main Release Card -->
+    
     <div class="card">
         <h2>Main Release</h2>
         <div class="main-release-info">
             <div class="release-details">
-
                 <p>{{ game.release_name or 'N/A' }}</p>
                 <p><strong>Release Group:</strong> {{ game.release_group or 'N/A' }}</p>
             </div>
             <div class="release-actions">
-                
-                {% if game['nfo_img_path'] %}
-                <a href="{{ url_for('main.serve_nfo_file', filename=game['nfo_img_path']) }}" class="btn btn-pink" target="_blank"><span class="material-symbols-outlined">description</span>View NFO</a>
-                {% else %}{% endif %}                
-
+                {# --- FIX: Accessing object attribute with a dot --- #}
+                {% if game.nfo_img_path %}
+                <a href="{{ url_for('main.serve_nfo_file', filename=game.nfo_img_path) }}" class="btn btn-pink" target="_blank">
+                    <span class="material-symbols-outlined">description</span> View NFO
+                </a>
+                {% endif %}
+    
                 <a href="{{ url_for('main.interactive_search', game_id=game.id) }}" class="btn btn-blue">
                     <span class="material-symbols-outlined">search</span> Search
                 </a>
-
             </div>
         </div>
+    
+        {% if game.alternative_releases %}
+        <h2>Alternative Releases</h2>
+            {% for alt in game.alternative_releases %}
+                <div class="main-release-info">
+                    <div class="release-details">
+                        <p>{{ alt.release_name }}</p>
+                        <p><strong>Source:</strong> {{ alt.source }}</p>
+                    </div>
+                    <div class="release-actions">
+                        {# --- NEW: NFO button for alternative releases --- #}
+                        {% if alt.nfo_img_path %}
+                        <a href="{{ url_for('main.serve_nfo_file', filename=alt.nfo_img_path) }}" class="btn btn-sm btn-pink" target="_blank">
+                            <span class="material-symbols-outlined">description</span> View NFO
+                        </a>
+                        {% endif %}
+                        
+                        <a href="{{ url_for('main.interactive_search', game_id=game.id, q=alt.release_name) }}" class="btn btn-sm btn-primary">
+                            <span class="material-symbols-outlined">search</span> Search
+                        </a>
+                    </div>
+                </div>
+            {% endfor %}
+        {% endif %}
     </div>
+    
+      
 
     <!-- Content Management Section -->
     <div class="card">

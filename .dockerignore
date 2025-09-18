@@ -1,0 +1,26 @@
+# Docker ignore file
+
+# Git
+.git
+.gitignore
+
+# Python virtual environment
+venv
+.venv
+env
+.env
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDE / Editor specific
+.idea
+.vscode
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml

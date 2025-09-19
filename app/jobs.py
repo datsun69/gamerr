@@ -171,44 +171,28 @@ def update_download_statuses(app):
             deleted_hashes = set(games_by_hash.keys()) - active_hashes
             for dead_hash in deleted_hashes:
                 game = games_by_hash.get(dead_hash)
-                game.status = 'Cracked'
+
+                # SCENARIO 1: The download was already complete. The job is done.
+                if game.status == 'Downloaded':
+                    app.logger.info(f"Torrent for '{game.official_title}' removed post-download. Final status remains 'Downloaded'.")
+                    game.torrent_hash = None
+                    continue
+
+                # SCENARIO 2: The download was aborted before completion. Revert to 'Cracked'.
+                app.logger.warning(f"Torrent for '{game.official_title}' (Status: {game.status}) removed before completion. Reverting to available state.")
+                
+                # Use our stored release_type to revert to the correct status
+                if game.release_type == 'Scene':
+                    game.status = 'Cracked (Scene)'
+                else: # 'P2P' and 'Repack' both revert to P2P status
+                    game.status = 'Cracked (P2P)'
+                
                 game.torrent_hash = None
             
             db.session.commit()
         except Exception as e:
             db.session.rollback()
             app.logger.error(f"Error in update_download_statuses: {e}")
-
-def process_completed_downloads(app):
-    """Scheduled job to perform post-processing on downloaded games."""
-    with app.app_context():
-        games_to_process = Game.query.filter_by(status='Downloaded').filter(Game.release_name.isnot(None)).all()
-        if not games_to_process:
-            return
-
-        current_app.logger.info(f"Post-processor: Found {len(games_to_process)} game(s) to process.")
-        
-        downloads_base = Path(current_app.config['DOWNLOADS_PATH'])
-        library_base = Path(current_app.config['LIBRARY_PATH'])
-        ASSET_EXTENSIONS = {'.nfo', '.sfv', '.jpg', '.png'}
-        
-        for game in games_to_process:
-            try:
-                source_folder = downloads_base / game.release_name.strip()
-                dest_folder = library_base / game.release_name.strip()
-                
-                if not source_folder.is_dir() or not dest_folder.is_dir():
-                    continue
-                
-                # ... (File copy logic remains the same) ...
-                
-                game.status = 'Imported'
-                db.session.commit()
-                current_app.logger.info(f"Successfully processed and imported '{game.release_name}'.")
-
-            except Exception as e:
-                db.session.rollback()
-                current_app.logger.error(f"Error post-processing '{game.release_name}': {e}")
 
 def refresh_discover_cache(app):
     """Scheduled job to refresh the IGDB discover lists."""

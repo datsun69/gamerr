@@ -27,6 +27,7 @@ class Game(db.Model):
     status = db.Column(db.String, default='Monitoring', nullable=False)
     release_name = db.Column(db.String, nullable=True)
     release_group = db.Column(db.String, nullable=True)
+    release_type = db.Column(db.String, nullable=True)
     nfo_path = db.Column(db.String, nullable=True)
     nfo_img_path = db.Column(db.String, nullable=True)
     torrent_hash = db.Column(db.String, nullable=True)

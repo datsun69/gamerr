@@ -550,6 +550,15 @@ def process_all_releases_for_game(game_id):
 
         game.release_name = primary_release['release_name']
         game.release_group = primary_release['source']
+
+        game.release_type = primary_release['type']
+        
+        # This is the logic for setting the status
+        if primary_release['type'] == 'Scene':
+            game.status = 'Cracked (Scene)'
+        else: # This covers 'Repack' and 'P2P'
+            game.status = 'Cracked (P2P)'
+
         game.nfo_path, game.nfo_img_path = fetch_and_save_nfo(primary_release['release_name'])
         current_app.logger.info(f"    SUCCESS! Assigning primary release: '{game.release_name}'")
 

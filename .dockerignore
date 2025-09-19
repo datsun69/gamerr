@@ -24,3 +24,6 @@ __pycache__/
 Dockerfile
 .dockerignore
 docker-compose.yml
+
+# Other
+run.bat

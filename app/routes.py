@@ -153,29 +153,34 @@ def library_scan():
 def library_import_confirm():
     """Receives a confirmed match from the UI and adds it to the database."""
     data = request.get_json()
+    igdb_id = str(data.get('igdb_id'))
 
-    # Check if this game is already in the database (by igdb_id or path)
+    # Check if this game is already in the database
     exists = Game.query.filter(
-        (Game.igdb_id == str(data.get('igdb_id'))) | 
+        (Game.igdb_id == igdb_id) | 
         (Game.local_path == data.get('folder_name'))
     ).first()
 
     if exists:
-        # Return an error if the game already exists to prevent duplicates
         return jsonify({'error': 'Game already exists in the database.'}), 409
 
-    new_game = Game(
-        igdb_id=str(data.get('igdb_id')),
-        official_title=data.get('official_title'),
-        cover_url=data.get('cover_url'),
-        release_date=current_app.jinja_env.filters['timestamp_to_date'](data.get('release_timestamp')),
-        status='Imported',
-        local_path=data.get('folder_name')
-    )
+    # --- NEW: Fetch the full, rich details from IGDB ---
+    game_details = get_igdb_game_details(igdb_id)
+    if not game_details:
+        return jsonify({'error': 'Could not fetch full game details from IGDB.'}), 500
+
+    # Create the new game using the complete dataset
+    new_game = Game(**game_details)
+    
+    # Set the status and local path specific to an imported game
+    new_game.status = 'Imported'
+    new_game.local_path = data.get('folder_name')
+    
     db.session.add(new_game)
     db.session.commit()
     
     return jsonify({'success': True, 'game_id': new_game.id}), 201
+
 
 # Manual Search & Download Routes
 @main.route('/search/<int:game_id>', methods=['GET', 'POST'])

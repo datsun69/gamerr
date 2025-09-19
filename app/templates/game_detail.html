@@ -22,8 +22,8 @@
             <h1>{{ game.official_title }}</h1>
             <p>{{ game.release_date or 'N/A' }}</p>
             <div class="metadata-pills">
-                {% if game.critic_score > 0 %}<span class="pill"><span class="material-symbols-outlined">star</span>Critic Score: {{ game.critic_score }}</span>{% endif %}
-                {% if game.user_score > 0 %}<span class="pill"><span class="material-symbols-outlined">person</span>User Score: {{ game.user_score }}</span>{% endif %}
+                {% if game.critic_score is not none and game.critic_score > 0 %}<span class="pill"><span class="material-symbols-outlined">star</span>Critic Score: {{ game.critic_score }}</span>{% endif %}
+                {% if game.user_score is not none and game.user_score > 0 %}<span class="pill"><span class="material-symbols-outlined">person</span>User Score: {{ game.user_score }}</span>{% endif %}
             </div>
             <p class="game-summary nomobile">{{ game.summary }}</p>
             <div class="metadata-pills">

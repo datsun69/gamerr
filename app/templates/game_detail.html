@@ -52,6 +52,7 @@
     <!-- Main Release Card -->
     
     <div class="card">
+        {% if game.release_name %}
         <h2>Main Release</h2>
         <div class="main-release-info">
             <div class="release-details">
@@ -71,9 +72,10 @@
                 </a>
             </div>
         </div>
+        {% endif %}
     
         {% if game.alternative_releases %}
-        <h2>Alternative Releases</h2>
+        <h2>{% if game.release_name %}Alternative Releases{% else %}Releases{% endif %}</h2>
             {% for alt in game.alternative_releases %}
                 <div class="main-release-info">
                     <div class="release-details">

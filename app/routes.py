@@ -275,6 +275,7 @@ def activity_data():
                 'hash': t.hash,
                 'name': t.name,
                 'friendly_name': hash_to_title.get(t.hash, t.name),
+                'torrent_name': t.name,
                 'state': t.state.upper(),
                 'progress': f"{t.progress * 100:.1f}%",
                 'size': format_bytes(t.size),

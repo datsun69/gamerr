@@ -19,6 +19,9 @@ import feedparser
 from qbittorrentapi import Client, exceptions
 from flask import current_app
 import xml.etree.ElementTree as ET
+import unicodedata
+from urllib3.util.retry import Retry
+from requests.adapters import HTTPAdapter
 
 # --- Local Application Imports ---
 from . import db
@@ -425,7 +428,7 @@ def process_all_releases_for_game(game_id):
         current_app.logger.error(f"Unified engine called with invalid game_id: {game_id}")
         return
 
-    current_app.logger.info(f"--> Starting UNIFIED release scan for '{game.official_title}'")
+    current_app.logger.info(f"--> Starting UNIFIED release scan for '{game.official_title}' (Current Status: {game.status})")
 
     # --- ENGINE CONSTANTS ---
     MOVIE_KEYWORDS = {'BDRIP', 'BLURAY', 'HDTV', 'X264', 'X265', 'DTSHD', 'DVDRIP'}
@@ -442,16 +445,13 @@ def process_all_releases_for_game(game_id):
             release_date = datetime.fromtimestamp(int(release_timestamp))
             delta_days = (release_date - game_date).days
             
-            if delta_days < -30: return -1000 # Too early, likely fake
-            
-            # More flexible timing for different scenarios:
-            if delta_days <= 90:    return 200  # Very good - within 3 months
-            if delta_days <= 365:   return 150  # Good - within 1 year  
-            if delta_days <= 730:   return 100  # OK - within 2 years
-            if delta_days <= 1095:  return 50   # Acceptable - within 3 years (heavy DRM)
-            if delta_days <= 1460:  return 25   # Late but possible - within 4 years
-            
-            return -1000 # Too late, probably for a different game/remake
+            if delta_days < -30: return -1000
+            if delta_days <= 90:    return 200
+            if delta_days <= 365:   return 150
+            if delta_days <= 730:   return 100
+            if delta_days <= 1095:  return 50
+            if delta_days <= 1460:  return 25
+            return -1000
         except Exception:
             return 0
     
@@ -460,9 +460,28 @@ def process_all_releases_for_game(game_id):
             return 'Repack'
         return original_type
 
-    def _normalize_title(title):
-        t = re.sub(r'[_.:-]', ' ', title.lower())
-        return re.sub(r'\s+', ' ', t).strip()
+    # --- NEW, MORE ROBUST MATCHING FUNCTION ---
+    def _is_valid_game_match(official_title, candidate_name):
+        """
+        Compares two strings by simplifying them to a common ASCII format.
+        This correctly handles special characters like 'ö' vs 'o'.
+        """
+        def _simplify_text(text):
+            # Convert to lowercase
+            text = text.lower()
+            # Replace common separators with spaces
+            text = re.sub(r'[_.:-]', ' ', text)
+            # Normalize Unicode characters to their base ASCII form (e.g., ö -> o)
+            text = ''.join(c for c in unicodedata.normalize('NFD', text) if unicodedata.category(c) != 'Mn')
+            # Remove any remaining non-alphanumeric characters (except spaces)
+            text = re.sub(r'[^\w\s]', '', text)
+            # Collapse multiple spaces
+            return re.sub(r'\s+', ' ', text).strip()
+
+        simplified_title = _simplify_text(official_title)
+        simplified_candidate = _simplify_text(candidate_name)
+
+        return simplified_title in simplified_candidate
 
     # --- STEP 1: GATHER EVERYTHING FROM ALL SOURCES ---
     all_releases = {}
@@ -475,7 +494,7 @@ def process_all_releases_for_game(game_id):
     
     fitgirl_release = check_source_fitgirl(game.official_title)
     if fitgirl_release:
-        all_releases.setdefault(fitgirl_release, {'source': 'FitGirl', 'type': 'Repack', 'timestamp': None})
+        all_releases.setdefault(fitgirl_release, {'source': 'FitGirl', 'type': 'Repack', 'timestamp': int(time.time())})
     
     if not all_releases:
         current_app.logger.info(f"    -> No potential releases found for '{game.official_title}'.")
@@ -488,113 +507,97 @@ def process_all_releases_for_game(game_id):
     base_game_candidates = []
     add_ons = []
 
-    # DEBUG: Log all releases first
-    current_app.logger.info(f"    -> DEBUG: All releases found:")
-    for name, data in all_releases.items():
-        current_app.logger.info(f"         '{name}' - {data}")
-
     for name, data in all_releases.items():
         clean_name = html.unescape(name)
         upper_words = set(clean_name.upper().replace('.', ' ').replace('_', ' ').replace('-', ' ').split())
         
-        current_app.logger.info(f"    -> DEBUG: Processing '{clean_name}'")
-        
-        # Categorize first
         if not TYPE_BLOCKED_KEYWORDS.isdisjoint(upper_words):
-            current_app.logger.info(f"    -> DEBUG: '{clean_name}' categorized as add-on (blocked keywords)")
             add_ons.append({'release_name': clean_name, **data})
             continue
 
-        # Filter base games
         if not MOVIE_KEYWORDS.isdisjoint(upper_words):
-            current_app.logger.info(f"    -> DEBUG: '{clean_name}' filtered out (movie keywords)")
             continue
         
-        # Use improved matching instead of simple substring check
+        # --- USE THE NEW, ROBUST MATCHER ---
         if not _is_valid_game_match(game.official_title, clean_name):
-            current_app.logger.info(f"    -> DEBUG: '{clean_name}' filtered out (similarity too low)")
             continue
             
-        # Score and finalize type for valid base games
         data['score'] = _calculate_relevancy_score(game.release_date, data.get('timestamp'))
         if data['score'] < 0:
-            current_app.logger.info(f"    -> DEBUG: '{clean_name}' filtered out (bad relevancy score: {data['score']})")
             continue
             
-        current_app.logger.info(f"    -> DEBUG: '{clean_name}' ACCEPTED as base game candidate (score: {data['score']})")
         data['release_name'] = clean_name
         data['type'] = _detect_type(clean_name, data.get('type', 'P2P'))
         data['is_pc'] = PLATFORM_KEYWORDS.isdisjoint(upper_words)
         base_game_candidates.append(data)
 
-    # --- STEP 3: PROCESS BASE GAMES ---
+    # --- STEP 3: PROCESS BASE GAMES (with imported game fix) ---
     if not base_game_candidates:
         current_app.logger.info(f"    -> No valid BASE GAME releases found after filtering.")
     else:
-        # Sort to find the best primary release (PC first, then score, then tier)
         sorted_games = sorted(
             base_game_candidates,
             key=lambda item: (item['is_pc'], item['score'], TIER_ORDER.get(item['type'], 0)),
             reverse=True
         )
         
-        primary_release = sorted_games[0]
-        alternative_releases = sorted_games[1:]
+        if game.status == 'Imported':
+            current_app.logger.info(f"    -> Game is 'Imported'. Preserving status, scanning for new alternative releases.")
+            existing_alternatives = {r.release_name for r in game.alternative_releases}
+            new_alt_count = 0
+            for alt_data in sorted_games:
+                if alt_data['release_name'] not in existing_alternatives:
+                    nfo_path, nfo_img_path = fetch_and_save_nfo(alt_data['release_name'])
+                    alt_release = AlternativeRelease(
+                        release_name=alt_data['release_name'], source=alt_data['source'], game_id=game.id,
+                        nfo_path=nfo_path, nfo_img_path=nfo_img_path
+                    )
+                    db.session.add(alt_release)
+                    new_alt_count += 1
+            if new_alt_count > 0:
+                 current_app.logger.info(f"    -> Saved {new_alt_count} new alternative releases.")
+        else:
+            primary_release = sorted_games[0]
+            alternative_releases = sorted_games[1:]
 
-        # Update Game with primary release
-    
-        if primary_release['type'] == 'Scene':
-            game.status = 'Cracked (Scene)'
-        else: # This covers 'Repack' and 'P2P'
-            game.status = 'Cracked (P2P)'
+            game.release_name = primary_release['release_name']
+            game.release_group = primary_release['source']
+            game.release_type = primary_release['type']
+            
+            if primary_release['type'] == 'Scene':
+                game.status = 'Cracked (Scene)'
+            else: # Covers 'Repack' and 'P2P'
+                game.status = 'Cracked (P2P)'
+            
+            game.nfo_path, game.nfo_img_path = fetch_and_save_nfo(primary_release['release_name'])
+            current_app.logger.info(f"    SUCCESS! Assigning primary release: '{game.release_name}'")
 
-        game.release_name = primary_release['release_name']
-        game.release_group = primary_release['source']
-
-        game.release_type = primary_release['type']
-        
-        # This is the logic for setting the status
-        if primary_release['type'] == 'Scene':
-            game.status = 'Cracked (Scene)'
-        else: # This covers 'Repack' and 'P2P'
-            game.status = 'Cracked (P2P)'
-
-        game.nfo_path, game.nfo_img_path = fetch_and_save_nfo(primary_release['release_name'])
-        current_app.logger.info(f"    SUCCESS! Assigning primary release: '{game.release_name}'")
-
-        # Save all other valid releases as Alternatives
-        AlternativeRelease.query.filter_by(game_id=game.id).delete()
-        for alt_data in alternative_releases:
-            nfo_path, nfo_img_path = fetch_and_save_nfo(alt_data['release_name'])
-            alt_release = AlternativeRelease(
-                release_name=alt_data['release_name'], 
-                source=alt_data['source'], 
-                game_id=game.id,
-                nfo_path=nfo_path,
-                nfo_img_path=nfo_img_path
-            )
-            db.session.add(alt_release)
-        current_app.logger.info(f"    -> Saved {len(alternative_releases)} alternative releases.")
+            AlternativeRelease.query.filter_by(game_id=game.id).delete()
+            for alt_data in alternative_releases:
+                nfo_path, nfo_img_path = fetch_and_save_nfo(alt_data['release_name'])
+                alt_release = AlternativeRelease(
+                    release_name=alt_data['release_name'], source=alt_data['source'], game_id=game.id,
+                    nfo_path=nfo_path, nfo_img_path=nfo_img_path
+                )
+                db.session.add(alt_release)
+            current_app.logger.info(f"    -> Saved {len(alternative_releases)} alternative releases.")
 
     # --- STEP 4: PROCESS ADD-ONS ---
-    if not add_ons:
-        current_app.logger.info(f"    -> No valid ADD-ON releases found.")
-    else:
+    if add_ons:
         existing_add_ons = {r.release_name for r in AdditionalRelease.query.filter_by(game_id=game.id).all()}
         new_add_on_count = 0
         for item in add_ons:
             if item['release_name'] not in existing_add_ons:
                 release_type = parse_additional_release_info(item['release_name'])
-                if release_type: # Only save if it's a valid type
+                if release_type:
                     new_add_on = AdditionalRelease(
-                        release_name=item['release_name'], 
-                        release_type=release_type, 
-                        source=item.get('source'),
-                        game_id=game.id
+                        release_name=item['release_name'], release_type=release_type, 
+                        source=item.get('source'), game_id=game.id
                     )
                     db.session.add(new_add_on)
                     new_add_on_count += 1
-        current_app.logger.info(f"    -> Saved {new_add_on_count} new add-on releases.")
+        if new_add_on_count > 0:
+            current_app.logger.info(f"    -> Saved {new_add_on_count} new add-on releases.")
     
     game.needs_release_check = False
     db.session.commit()
@@ -602,19 +605,31 @@ def process_all_releases_for_game(game_id):
 
 def fetch_and_save_nfo(release_name):
     """
-    Fetches NFO data and image.
+    Fetches NFO data and image, now with retry logic for network resilience.
     """
     current_app.logger.info(f"NFO Fetcher: Attempting to fetch NFO for '{release_name}'")
+
+    # Setup a requests session with a retry strategy
+    retry_strategy = Retry(
+        total=3,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
+    )
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    http = requests.Session()
+    http.mount("https://", adapter)
+
     try:
         url = "https://api.predb.net/"
         params = {'type': 'nfo', 'release': release_name}
-        response = requests.get(url, params=params, timeout=10)
+        
+        response = http.get(url, params=params, timeout=15)
         response.raise_for_status()
         json_data = response.json()
         nfo_data_dict = json_data.get('data')
 
         if not nfo_data_dict or not isinstance(nfo_data_dict, dict):
-            current_app.logger.info("NFO Fetcher: No 'data' object found.")
+            current_app.logger.info(f"NFO Fetcher: No 'data' object found for '{release_name}'.")
             return None, None
         
         nfo_url = nfo_data_dict.get('nfo')
@@ -626,32 +641,32 @@ def fetch_and_save_nfo(release_name):
 
         if nfo_url:
             try:
-                nfo_response = requests.get(nfo_url, timeout=10)
+                nfo_response = http.get(nfo_url, timeout=15)
                 if nfo_response.status_code == 200:
                     safe_filename = "".join(c for c in release_name if c.isalnum() or c in ('_', '-')).rstrip()
                     local_nfo_path = os.path.join(nfo_storage_path, f"{safe_filename}.nfo")
                     with open(local_nfo_path, 'w', encoding='utf-8', errors='ignore') as f:
                         f.write(nfo_response.text)
             except Exception as e:
-                current_app.logger.error(f"NFO Fetcher: Error downloading NFO file: {e}")
+                current_app.logger.warning(f"NFO Fetcher: Could not download NFO file for '{release_name}': {e}")
 
         if nfo_img_url:
             try:
-                nfo_img_response = requests.get(nfo_img_url, timeout=10)
+                nfo_img_response = http.get(nfo_img_url, timeout=15)
                 if nfo_img_response.status_code == 200:
                     safe_filename = "".join(c for c in release_name if c.isalnum() or c in ('_', '-')).rstrip()
                     local_nfo_img_path = os.path.join(nfo_storage_path, f"{safe_filename}.png")
                     with open(local_nfo_img_path, 'wb') as f:
                         f.write(nfo_img_response.content)
             except Exception as e:
-                current_app.logger.error(f"NFO Fetcher: Error downloading NFO image: {e}")
+                current_app.logger.warning(f"NFO Fetcher: Could not download NFO image for '{release_name}': {e}")
         
         db_nfo_path = os.path.relpath(local_nfo_path, nfo_storage_path) if local_nfo_path else None
         db_nfo_img_path = os.path.relpath(local_nfo_img_path, nfo_storage_path) if local_nfo_img_path else None
         
         return db_nfo_path, db_nfo_img_path
     except Exception as e:
-        current_app.logger.error(f"NFO Fetcher: An error occurred: {e}")
+        current_app.logger.warning(f"NFO Fetcher: A non-retryable error occurred for '{release_name}': {e}")
         return None, None
 
 def parse_additional_release_info(release_name):

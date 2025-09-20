@@ -29,7 +29,8 @@
         return `
             <div class="game-card">
                 <div class="game-details">
-                    <h4 class="mb-1">${torrent.friendly_name}</h4>
+                    <h4>${torrent.friendly_name}</h4>
+                    <p class="mb-1">${torrent.torrent_name}</p>
                     
                     <div class="progress-bar">
                         <div class="progress-bar-inner" style="width: ${torrent.progress};" title="${torrent.progress}">

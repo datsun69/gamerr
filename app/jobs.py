@@ -72,7 +72,9 @@ def check_for_releases(app):
             elif run_backlog_check:
                 app.logger.info(f"    -> Checking 'backlog' release: '{game.official_title}'")
                 process_all_releases_for_game(game.id)
-        
+
+            time.sleep(2)    
+
         if run_backlog_check:
             last_check_setting.value = str(time.time())
             app.logger.info("    -> Updating last backlog check timestamp to now.")
@@ -117,6 +119,7 @@ def scan_all_library_games(app):
             for game in games_in_batch:
                 # Call the single, powerful, unified engine for each game
                 process_all_releases_for_game(game.id)
+                time.sleep(2)
             
             offset += batch_size
 

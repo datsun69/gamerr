@@ -554,6 +554,7 @@ def process_all_releases_for_game(game_id):
                     )
                     db.session.add(alt_release)
                     new_alt_count += 1
+                    time.sleep(1)
             if new_alt_count > 0:
                  current_app.logger.info(f"    -> Saved {new_alt_count} new alternative releases.")
         else:
@@ -580,6 +581,7 @@ def process_all_releases_for_game(game_id):
                     nfo_path=nfo_path, nfo_img_path=nfo_img_path
                 )
                 db.session.add(alt_release)
+                time.sleep(1) # <--- AND ADD POLITE DELAY HERE
             current_app.logger.info(f"    -> Saved {len(alternative_releases)} alternative releases.")
 
     # --- STEP 4: PROCESS ADD-ONS ---

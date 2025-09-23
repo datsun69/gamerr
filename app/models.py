@@ -33,12 +33,17 @@ class Game(db.Model):
     torrent_hash = db.Column(db.String, nullable=True)
     local_path = db.Column(db.String, nullable=True)
 
-    # --- NEW: Relationship to Additional Releases ---
-    # This links a Game to all of its DLCs, Updates, etc.
+    # --- Relationship to Additional Releases ---
     needs_content_scan = db.Column(db.Boolean, default=False, nullable=False)
     needs_release_check = db.Column(db.Boolean, default=False, nullable=False)
     additional_releases = db.relationship('AdditionalRelease', backref='game', lazy=True, cascade="all, delete-orphan")
     alternative_releases = db.relationship('AlternativeRelease', backref='game', lazy=True, cascade="all, delete-orphan")
+
+    release_found_timestamp = db.Column(db.Integer, nullable=True) # Timestamp when the primary release was first assigned
+    
+    # --- Link to Download Profile ---
+    profile_id = db.Column(db.Integer, db.ForeignKey('profile.id'), nullable=True)
+    profile = db.relationship('Profile', backref='games')    
     
 class AlternativeRelease(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -66,6 +71,40 @@ class AdditionalRelease(db.Model):
 class Setting(db.Model):
     key = db.Column(db.String, primary_key=True)
     value = db.Column(db.String, nullable=True)
+
+class Indexer(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False, unique=True)
+    indexer_id = db.Column(db.String(100), nullable=False) # Parsed from the URL, e.g., 'torrentleech'
+    enabled = db.Column(db.Boolean, default=True, nullable=False)
+    # The fields below are for future use based on your screenshot, establishing a solid foundation
+    categories_override = db.Column(db.String(100), nullable=True)
+    extra_parameters = db.Column(db.String(200), nullable=True)
+
+    def __repr__(self):
+        return f'<Indexer {self.name}>'
+
+class Profile(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False, unique=True)
+    
+    # --- Quality & Type Filters ---
+    # Store as a JSON array of strings: ["Scene", "Repack", "P2P"]
+    release_types = db.Column(db.Text, nullable=False, default='[]') 
+    
+    # --- Group & Source Filters ---
+    # Store as a JSON array of strings: ["FitGirl", "DODI", "FLT"]
+    preferred_groups = db.Column(db.Text, nullable=True, default='[]')
+    avoided_groups = db.Column(db.Text, nullable=True, default='[]')
+    
+    # --- Timing ---
+    # Delay in hours before snatching a release
+    delay_hours = db.Column(db.Integer, default=0, nullable=False)
+
+    is_default = db.Column(db.Boolean, default=False, nullable=False)
+
+    def __repr__(self):
+        return f'<Profile {self.name}>'
 
 class SearchTask(db.Model):
     id = db.Column(db.String, primary_key=True)

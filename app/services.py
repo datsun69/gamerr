@@ -25,7 +25,7 @@ from requests.adapters import HTTPAdapter
 
 # --- Local Application Imports ---
 from . import db
-from .models import Game, Setting, DiscoverCache, AlternativeRelease, AdditionalRelease
+from .models import Game, Setting, DiscoverCache, AlternativeRelease, AdditionalRelease, Indexer
 
 # --- NEW: Global cache for the IGDB token ---
 _igdb_access_token = None
@@ -278,12 +278,21 @@ def search_jackett(game_title):
     """
     settings = get_settings_dict()
     if not all([settings.get('jackett_url'), settings.get('jackett_api_key')]):
-        current_app.logger.error("Jackett search: Settings are incomplete.")
+        current_app.logger.error("Jackett search: URL or API Key are not configured.")
         return []
 
-    indexers = settings.get('jackett_indexers', 'all').replace(',', ';') or 'all'
+    # --- NEW LOGIC ---
+    # Fetch enabled indexers from the database
+    enabled_indexers = Indexer.query.filter_by(enabled=True).all()
+    if not enabled_indexers:
+        current_app.logger.warning("Jackett search: No enabled indexers found in settings.")
+        return []
+    
+    # Construct the indexer string (e.g., 'torrentleech;rutracker')
+    indexer_ids = ';'.join([idx.indexer_id for idx in enabled_indexers])
+    
     url = (
-        f"{settings['jackett_url']}/api/v2.0/indexers/{indexers}/results/torznab/"
+        f"{settings['jackett_url']}/api/v2.0/indexers/{indexer_ids}/results/torznab/"
         f"?apikey={settings['jackett_api_key']}&t=search&cat=4000&q={urllib.parse.quote_plus(game_title)}"
     )
     
@@ -743,18 +752,37 @@ def process_library_scan():
 
 def _clean_release_name(release_name):
     """
-    The single, definitive function for cleaning any release string.
+    A more robust function for cleaning release strings for IGDB searching.
+    It intelligently removes the release group before cleaning other keywords.
     """
     if not isinstance(release_name, str): return ""
-    cleaned = release_name.lower().replace('.', ' ').replace('_', ' ').replace('-', ' ')
+
+    cleaned = release_name
+
+    # --- NEW LOGIC: Prioritize splitting by the release group ---
+    # This is the most reliable way to remove any group name.
+    # It splits 'Game.Name-GROUP' into 'Game.Name' and 'GROUP'.
+    if '-' in cleaned:
+        parts = cleaned.rsplit('-', 1)
+        # A simple check: if the part after the hyphen has no spaces or dots,
+        # it's almost certainly the release group.
+        if ' ' not in parts[1] and '.' not in parts[1]:
+            cleaned = parts[0]  # We only want the part before the group
+
+    # --- Now, perform the standard cleaning on the result ---
+    cleaned = cleaned.lower().replace('.', ' ').replace('_', ' ').replace('-', ' ')
+    
+    # Use PTN to handle things like year, resolution, etc., that might still be left
     info = PTN.parse(cleaned)
     cleaned = info.get('title', cleaned)
+
+    # This list is now a fallback for other junk keywords PTN might miss
     patterns_to_remove = [
-        r'v\d+(\.\d+)*', r'\d{3,4}p', r'repack', r'multi\d*',
-        r'flt', 'rune', 'codex', 'elamigos', 'p2p', 'tenoke',
+        r'v\d+(\.\d+)*', r'\d{3,4}p', r'repack', r'multi\d*', r'dlc'
     ]
     for pattern in patterns_to_remove:
         cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
+
     cleaned = re.sub(r"[:'!,\[\]]", "", cleaned)
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     return cleaned

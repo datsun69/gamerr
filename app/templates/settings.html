@@ -4,73 +4,419 @@
 
 {% block content %}
 
-        <h2>Settings</h2>
+<h2>Settings</h2>
 
-        <form action="{{ url_for('main.save_settings') }}" method="post" class="settings-form">
+<form action="{{ url_for('main.save_settings') }}" method="post" class="settings-form">
+    
+    <details class="content-card">
+        <summary class="collapsible-header">
+            <div>
+            <h2>Automation</h2>
+            <p>Configure automatic downloading of available releases.</p>
+            </div>
+            <span class="material-symbols-outlined collapsible-icon">keyboard_arrow_down</span>
+        </summary>
+        <div class="details-content">
+            <div class="form-group form-group-inline">
+                <input type="checkbox" id="auto_download_enabled" name="auto_download_enabled" value="true" {% if settings.auto_download_enabled == 'true' %}checked{% endif %}>
+                <label for="auto_download_enabled">Enable Automatic Downloading</label>
+            </div>
+            <small>When enabled, Gamerr will automatically search for and snatch releases that match a game's assigned profile.</small>
+
+            <h3 style="margin: 2rem 0 1rem 0;">Download Profiles</h3>
+            <table id="profiles-table">
+                <thead>
+                    <tr>
+                        <th>Default</th>
+                        <th>Name</th>
+                        <th>Allowed Release Types</th>
+                        <th>Delay (Hours)</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+    
+                <tbody>
+                    {# This will be populated once we update the route #}
+                    {% for profile in profiles %}
+                    <tr data-id="{{ profile.id }}" 
+                        data-name="{{ profile.name }}" 
+                        data-types='{{ profile.release_types }}'
+                        data-preferred='{{ profile.preferred_groups }}'
+                        data-avoided='{{ profile.avoided_groups }}'
+                        data-delay="{{ profile.delay_hours }}">
+                        <td>
+                            <input type="radio" name="default_profile" value="{{ profile.id }}" {% if profile.is_default %}checked{% endif %} title="Set as default profile">
+                        </td>                        
+                        <td>{{ profile.name }}</td>
+                        <td>{{ (profile.release_types | fromjson) | join(', ') }}</td>
+                        <td>{{ profile.delay_hours }}</td>
+                        <td>
+                            <button type="button" class="btn btn-blue btn-edit-profile" title="Edit Profile"><span class="material-symbols-outlined">edit</span></button>
+                            <button type="button" class="btn btn-red btn-delete-profile" title="Delete Profile"><span class="material-symbols-outlined">delete</span></button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% if not profiles %}
+                    <tr>
+                        <td colspan="4" class="text-center">No download profiles configured.</td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+                
+                  
+            </table>
+            <br>
+            <button type="button" class="btn btn-blue" id="btn-show-add-profile-modal">Add Profile</button>
+        </div>
+    </details>
+
+    <details class="content-card">
+        <summary class="collapsible-header">
+            <div>
+            <h2>IGDB / Twitch API</h2>
+            <p>Required for searching for games and fetching metadata.</p>
+            </div>
+            <span class="material-symbols-outlined collapsible-icon">keyboard_arrow_down</span>
+        </summary>
+        <div class="details-content">
+            <label for="twitch_client_id">Twitch Client ID</label><br>
+            <input type="text" id="twitch_client_id" name="twitch_client_id" value="{{ settings.twitch_client_id or '' }}" size="50"><br><br>
+            <label for="twitch_client_secret">Twitch Client Secret</label><br>
+            <input type="password" id="twitch_client_secret" name="twitch_client_secret" value="{{ settings.twitch_client_secret or '' }}" size="50">
+        </div>
+    </details>
+
+    <details class="content-card">
+        <summary class="collapsible-header">
+            <div>
+            <h2>Jackett</h2>
+            <p>Used for searching for releases on your indexers.</p>
+            </div>
+            <span class="material-symbols-outlined collapsible-icon">keyboard_arrow_down</span>
+        </summary>
+        <div class="details-content">
+            <label for="jackett_url">Jackett URL (e.g., http://localhost:9117)</label><br>
+            <input type="text" id="jackett_url" name="jackett_url" value="{{ settings.jackett_url or '' }}" size="50"><br><br>
+        
+            <label for="jackett_api_key">Jackett API Key</label><br>
+            <input type="password" id="jackett_api_key" name="jackett_api_key" value="{{ settings.jackett_api_key or '' }}" size="50">
             
 
-            <details class="content-card">
-                <summary class="collapsible-header">
-                    <div>
-                    <h2>IGDB / Twitch API</h2>
-                    <p>Required for searching for games and fetching metadata.</p>
-                    </div>
-                    <span class="material-symbols-outlined collapsible-icon">keyboard_arrow_down</span>
-                </summary>
-                <div class="details-content">
-                    <label for="twitch_client_id">Twitch Client ID</label><br>
-                    <input type="text" id="twitch_client_id" name="twitch_client_id" value="{{ settings.twitch_client_id }}" size="50"><br><br>
-                    <label for="twitch_client_secret">Twitch Client Secret</label><br>
-                    <input type="password" id="twitch_client_secret" name="twitch_client_secret" value="{{ settings.twitch_client_secret }}" size="50">
-                </div>
-            </details>
+            <h3 style="margin: 2rem 0 1rem 0;">Configured Indexers</h3>
+            <table id="indexers-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Indexer ID</th>
+                        <th>Enabled</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for indexer in indexers %}
+                    <tr data-id="{{ indexer.id }}">
+                        <td>{{ indexer.name }}</td>
+                        <td>{{ indexer.indexer_id }}</td>
+                        <td>
+                            {% if indexer.enabled %}
+                                <span class="material-symbols-outlined text-success" title="Enabled">check_circle</span>
+                            {% else %}
+                                <span class="material-symbols-outlined text-secondary" title="Disabled">cancel</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                             <button type="button" class="btn btn-red btn-delete-indexer" title="Delete Indexer"><span class="material-symbols-outlined">delete</span></button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% if not indexers %}
+                    <tr>
+                        <td colspan="4" class="text-center">No indexers configured.</td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+            <br>
+            <button type="button" class="btn btn-blue" id="btn-show-add-modal">Add Indexer</button>
+        </div>
+    </details>
 
-            <details class="content-card">
-                <summary class="collapsible-header">
-                    <div>
-                    <h2>Jackett</h2>
-                    <p>Used for searching for releases on your indexers.</p>
-                    </div>
-                    <span class="material-symbols-outlined collapsible-icon">keyboard_arrow_down</span>
-                </summary>
-                <div class="details-content">
-                    <label for="jackett_url">Jackett URL (e.g., http://localhost:9117)</label><br>
-                    <input type="text" id="jackett_url" name="jackett_url" value="{{ settings.jackett_url }}" size="50"><br><br>
-                
-                    <label for="jackett_api_key">Jackett API Key</label><br>
-                    <input type="text" id="jackett_api_key" name="jackett_api_key" value="{{ settings.jackett_api_key }}" size="50"><br><br>
-                
-                    <label for="jackett_indexers">Indexer IDs (comma-separated, e.g., torrentleech,rutracker or just 'all')</label><br>
-                    <input type="text" id="jackett_indexers" name="jackett_indexers" value="{{ settings.jackett_indexers }}" size="50">
-                </div>
-            </details>
+    <details class="content-card">
+        <summary class="collapsible-header">
+            <div>
+            <h2>qBittorrent</h2>
+            <p>Your download client.</p>
+            </div>
+            <span class="material-symbols-outlined collapsible-icon">keyboard_arrow_down</span>
+        </summary>
+        <div class="details-content">
+            <label for="qbittorrent_host">Host (e.g., localhost)</label><br>
+            <input type="text" id="qbittorrent_host" name="qbittorrent_host" value="{{ settings.qbittorrent_host or '' }}" size="50"><br><br>
+            <label for="qbittorrent_port">Port (e.g., 8080)</label><br>
+            <input type="text" id="qbittorrent_port" name="qbittorrent_port" value="{{ settings.qbittorrent_port or '' }}" size="50"><br><br>
+            <label for="qbittorrent_user">Username</label><br>
+            <input type="text" id="qbittorrent_user" name="qbittorrent_user" value="{{ settings.qbittorrent_user or '' }}" size="50"><br><br>
+            <label for="qbittorrent_pass">Password</label><br>
+            <input type="password" id="qbittorrent_pass" name="qbittorrent_pass" value="{{ settings.qbittorrent_pass or '' }}" size="50"><br><br>
+            <label for="qbittorrent_category">Category</label><br>
+            <input type="text" id="qbittorrent_category" name="qbittorrent_category" value="{{ settings.qbittorrent_category or '' }}" size="50">
+        </div>
+    </details>
 
-            <details class="content-card">
-                <summary class="collapsible-header">
-                    <div>
-                    <h2>qBittorrent</h2>
-                    <p>Your download client.</p>
+    <button type="submit" class="btn btn-green"><span class="material-symbols-outlined">save</span>Save Global Settings</button>
+</form>
+
+<!-- Add/Edit Indexer Modal -->
+<div class="modal-overlay" id="indexer-modal" role="dialog" aria-modal="true">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 id="modal-title">Add New Indexer</h3>
+            <button type="button" class="modal-close-btn" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div id="modal-error-alert" class="toast toast-error" style="display: none;"></div>
+            <form id="indexer-form">
+                <div class="form-group">
+                    <label for="indexer-name">Name</label>
+                    <input type="text" id="indexer-name" name="name" required size="50">
+                </div>
+
+                <small>A friendly name for this indexer.</small><br><br>
+            
+                <div class="form-group">
+                    <label for="indexer-url">URL Path</label>
+                    <input type="text" id="indexer-url" name="url" required size="50">
+                </div>
+                <small>Paste the full "Copy Torznab Feed" URL from Jackett.</small><br><br>
+
+                <div class="form-group">
+                    <label for="indexer-enabled">Enabled</label>
+                    <input type="checkbox" id="indexer-enabled" name="enabled" checked>
+                </div>
+                
+                <div class="form-group">
+                    <label for="indexer-categories">Categories Override (Optional)</label>
+                    <input type="text" id="indexer-categories" name="categories" size="50">
+                </div>
+                <small>e.g., 5070,6000</small>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-blue" id="btn-save-indexer">Save Indexer</button>
+        </div>
+    </div>
+</div>
+
+<!--Profile Modal -->
+<div class="modal-overlay" id="profile-modal" role="dialog" aria-modal="true">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 id="profile-modal-title">Add New Profile</h3>
+            <button type="button" class="modal-close-btn" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div id="profile-modal-error-alert" class="toast toast-error" style="display: none;"></div>
+            <form id="profile-form">
+                <input type="hidden" id="profile-id" name="id">
+                
+                <div class="form-group">
+                    <label for="profile-name">Profile Name</label>
+                    <input type="text" id="profile-name" name="name" required size="50">
+                </div>
+                <br>
+                
+                <div class="form-group">
+                    <label>Allowed Release Types</label>
+                    <div class="checkbox-group">
+                        <label><input type="checkbox" name="release_types" value="Scene"> Scene</label>
+                        <label><input type="checkbox" name="release_types" value="Repack"> Repack</label>
+                        <label><input type="checkbox" name="release_types" value="P2P"> P2P</label>
                     </div>
-                    <span class="material-symbols-outlined collapsible-icon">keyboard_arrow_down</span>
-                </summary>
-                <div class="details-content">
-                    <label for="qbittorrent_host">Host (e.g., localhost)</label><br>
-                    <input type="text" id="qbittorrent_host" name="qbittorrent_host" value="{{ settings.qbittorrent_host }}" size="50"><br><br>
+                </div>
+                <br>
+
+                <div class="form-group">
+                    <label for="profile-preferred-groups">Preferred Groups</label>
+                    <input type="text" id="profile-preferred-groups" name="preferred_groups">
                     
-                    <label for="qbittorrent_port">Port (e.g., 8080)</label><br>
-                    <input type="text" id="qbittorrent_port" name="qbittorrent_port" value="{{ settings.qbittorrent_port }}" size="50"><br><br>
-                
-                    <label for="qbittorrent_user">Username</label><br>
-                    <input type="text" id="qbittorrent_user" name="qbittorrent_user" value="{{ settings.qbittorrent_user }}" size="50"><br><br>
-                
-                    <label for="qbittorrent_pass">Password</label><br>
-                    <input type="password" id="qbittorrent_pass" name="qbittorrent_pass" value="{{ settings.qbittorrent_pass }}" size="50"><br><br>
-                
-                    <label for="qbittorrent_category">Category (for save path management)</label><br>
-                    <input type="text" id="qbittorrent_category" name="qbittorrent_category" value="{{ settings.qbittorrent_category }}" size="50">
                 </div>
-            </details>
+                <small>Comma-separated, e.g., FLT, FitGirl, DODI</small><br><br>
 
-            <button type="submit" class="btn btn-blue">Save Settings</button>
-        </form>
-        {% endblock %}
+                <div class="form-group">
+                    <label for="profile-avoided-groups">Avoided Groups</label>
+                    <input type="text" id="profile-avoided-groups" name="avoided_groups">
+                    
+                </div>
+                <small>Comma-separated, e.g., 3DM, ALiAS</small><br><br>
+
+                <div class="form-group">
+                    <label for="profile-delay-hours">Delay (Hours)</label>
+                    <input type="number" id="profile-delay-hours" name="delay_hours" min="0" value="0" style="width: 100px;">
+                    
+                </div>
+                <small>Wait this many hours after a release is found before snatching.</small><br><br>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-blue" id="btn-save-profile">Save Profile</button>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // =====================================================================
+        // INDEXER MODAL LOGIC (No Changes)
+        // =====================================================================
+        const indexerModal = document.getElementById('indexer-modal');
+        const indexerForm = document.getElementById('indexer-form');
+        const indexerModalErrorAlert = document.getElementById('modal-error-alert');
+        const openIndexerModalBtn = document.getElementById('btn-show-add-modal');
+        const closeIndexerModalBtns = indexerModal.querySelectorAll('.modal-close-btn');
+    
+        const showIndexerModal = () => {
+            indexerForm.reset();
+            indexerModal.querySelector('#modal-title').textContent = 'Add New Indexer';
+            indexerModalErrorAlert.style.display = 'none';
+            indexerModal.classList.add('is-active');
+        };
+        const hideIndexerModal = () => indexerModal.classList.remove('is-active');
+        openIndexerModalBtn.addEventListener('click', showIndexerModal);
+        closeIndexerModalBtns.forEach(btn => btn.addEventListener('click', hideIndexerModal));
+        indexerModal.addEventListener('click', (e) => { if (e.target === indexerModal) hideIndexerModal(); });
+    
+        document.getElementById('btn-save-indexer').addEventListener('click', async () => {
+            const formData = new FormData(indexerForm);
+            const data = {
+                name: formData.get('name'),
+                url: formData.get('url'),
+                enabled: formData.get('enabled') === 'on',
+                categories: formData.get('categories'),
+            };
+            const response = await fetch("{{ url_for('main.add_indexer') }}", {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            });
+            if (response.ok) {
+                hideIndexerModal();
+                window.location.reload(); 
+            } else {
+                const errorData = await response.json();
+                indexerModalErrorAlert.textContent = 'Error: ' + errorData.error;
+                indexerModalErrorAlert.style.display = 'block';
+            }
+        });
+    
+        document.getElementById('indexers-table').addEventListener('click', async (e) => {
+            const deleteButton = e.target.closest('.btn-delete-indexer');
+            if (deleteButton) {
+                if (!confirm('Are you sure you want to delete this indexer?')) return;
+                const row = deleteButton.closest('tr');
+                const indexerId = row.dataset.id;
+                const response = await fetch(`/settings/indexer/delete/${indexerId}`, { method: 'POST' });
+                if (response.ok) window.location.reload();
+                else alert('Failed to delete indexer.');
+            }
+        });
+    
+    
+        // =====================================================================
+        // NEW PROFILE MODAL LOGIC
+        // =====================================================================
+        const profileModal = document.getElementById('profile-modal');
+        const profileForm = document.getElementById('profile-form');
+        const profileModalErrorAlert = document.getElementById('profile-modal-error-alert');
+        const openProfileModalBtn = document.getElementById('btn-show-add-profile-modal');
+        const closeProfileModalBtns = profileModal.querySelectorAll('.modal-close-btn');
+    
+        const showProfileModal = (profileData = null) => {
+            profileForm.reset();
+            profileModalErrorAlert.style.display = 'none';
+    
+            if (profileData) {
+                // --- EDIT MODE ---
+                profileModal.querySelector('#profile-modal-title').textContent = 'Edit Profile';
+                document.getElementById('profile-id').value = profileData.id;
+                document.getElementById('profile-name').value = profileData.name;
+                document.getElementById('profile-preferred-groups').value = JSON.parse(profileData.preferred).join(', ');
+                document.getElementById('profile-avoided-groups').value = JSON.parse(profileData.avoided).join(', ');
+                document.getElementById('profile-delay-hours').value = profileData.delay;
+                
+                const types = JSON.parse(profileData.types);
+                profileForm.querySelectorAll('input[name="release_types"]').forEach(checkbox => {
+                    checkbox.checked = types.includes(checkbox.value);
+                });
+            } else {
+                // --- ADD MODE ---
+                profileModal.querySelector('#profile-modal-title').textContent = 'Add New Profile';
+            }
+            profileModal.classList.add('is-active');
+        };
+    
+        const hideProfileModal = () => profileModal.classList.remove('is-active');
+    
+        openProfileModalBtn.addEventListener('click', () => showProfileModal(null));
+        closeProfileModalBtns.forEach(btn => btn.addEventListener('click', hideProfileModal));
+        profileModal.addEventListener('click', (e) => { if (e.target === profileModal) hideProfileModal(); });
+    
+        // --- Save Profile (Add or Edit) ---
+        document.getElementById('btn-save-profile').addEventListener('click', async () => {
+            const selectedTypes = Array.from(profileForm.querySelectorAll('input[name="release_types"]:checked')).map(cb => cb.value);
+            
+            const data = {
+                id: document.getElementById('profile-id').value,
+                name: document.getElementById('profile-name').value,
+                release_types: selectedTypes,
+                preferred_groups: document.getElementById('profile-preferred-groups').value,
+                avoided_groups: document.getElementById('profile-avoided-groups').value,
+                delay_hours: document.getElementById('profile-delay-hours').value,
+            };
+    
+            // Determine if we're adding or editing
+            const isEditing = !!data.id;
+            const url = isEditing ? `/settings/profile/edit/${data.id}` : "{{ url_for('main.add_profile') }}";
+            
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            });
+    
+            if (response.ok) {
+                hideProfileModal();
+                window.location.reload();
+            } else {
+                const errorData = await response.json();
+                profileModalErrorAlert.textContent = 'Error: ' + errorData.error;
+                profileModalErrorAlert.style.display = 'block';
+            }
+        });
+    
+        // --- Table Actions (Edit and Delete) for Profiles ---
+        document.getElementById('profiles-table').addEventListener('click', async (e) => {
+            const editButton = e.target.closest('.btn-edit-profile');
+            const deleteButton = e.target.closest('.btn-delete-profile');
+    
+            if (editButton) {
+                const row = editButton.closest('tr');
+                // Pass the data stored in data-* attributes to the modal function
+                showProfileModal(row.dataset);
+            }
+            
+            if (deleteButton) {
+                if (!confirm('Are you sure you want to delete this profile?')) return;
+                const row = deleteButton.closest('tr');
+                const profileId = row.dataset.id;
+                const response = await fetch(`/settings/profile/delete/${profileId}`, { method: 'POST' });
+                if (response.ok) window.location.reload();
+                else alert('Failed to delete profile.');
+            }
+        });
+    
+    });
+    </script>
+{% endblock %}

@@ -13,6 +13,7 @@
 {% block scripts %}
 <script>
     const taskId = "{{ task_id }}";
+    const profiles = {{ profiles | tojson }};
     const resultsContainer = document.getElementById('results-container');
     const pageTitle = document.getElementById('page-title');
 
@@ -52,24 +53,40 @@
         results.forEach(game => {
             const releaseDate = timestampToDate(game.release_timestamp);
             const coverUrl = game.cover_url ? `https:${game.cover_url}` : `https://via.placeholder.com/150x200?text=No+Cover`;
+
+            let profileOptionsHtml = '<select name="profile_id" class="profile-select">';
+            if (profiles && profiles.length > 0) {
+                profiles.forEach(profile => {
+                    // The 'selected' attribute will pre-select the default profile
+                    const isSelected = profile.is_default ? 'selected' : '';
+                    profileOptionsHtml += `<option value="${profile.id}" ${isSelected}>${profile.name}</option>`;
+                });
+            } else {
+                profileOptionsHtml += '<option value="">No Profiles Available</option>';
+            }
+            profileOptionsHtml += '</select>';            
             
             html += `
             <li class="game-card">
                 <img src="${coverUrl}" class="game-cover" alt="Cover for ${game.name}">
                     <div class="game-details">
                         <h3>${game.name}</h3>
-
                         <p class="no-padding no-margin">${releaseDate}</p>
                     </div>
-                    <form action="{{ url_for('main.add_game_confirm') }}" method="post" style="justify-content: space-between;padding: 1rem;">
+                    <form action="{{ url_for('main.add_game_confirm') }}" method="post" class="game-card-actions">
                         <input type="hidden" name="igdb_id" value="${game.id}">
-                        <button type="submit" class="btn btn-blue btn-sm"><span class="material-symbols-outlined">add</span></button>
-                        <a href="https://www.igdb.com/games/${game.slug}" target="_blank" rel="noopener noreferrer" class="btn btn-lime btn-sm">
-                            <span class="material-symbols-outlined">open_in_new</span>
-                        </a>
+                        
+                        ${profileOptionsHtml} 
+                        
+                        <div class="button-group">
+                            <button type="submit" class="btn btn-blue" title="Add Game"><span class="material-symbols-outlined">add</span></button>
+                            <a href="https://www.igdb.com/games/${game.slug}" target="_blank" rel="noopener noreferrer" class="btn btn-lime" title="View on IGDB">
+                                <span class="material-symbols-outlined">open_in_new</span>
+                            </a>
+                        </div>
                     </form>
                 </li>`;
-        });
+            });
         html += '</ul>';
         pageTitle.innerText = 'Search Results';
         resultsContainer.innerHTML = html;

@@ -10,7 +10,7 @@ import re
 import html
 
 from . import db
-from .models import Game, SearchTask, AdditionalRelease, Setting
+from .models import Game, SearchTask, AdditionalRelease, Setting, Profile
 from datetime import datetime, timedelta
 import time
 
@@ -20,6 +20,8 @@ from .services import (
     get_qbit_client,
     update_discover_lists,
     process_all_releases_for_game,
+    search_jackett,
+    add_to_qbittorrent
 )
 
 def check_for_releases(app):
@@ -85,16 +87,32 @@ def process_release_check_queue(app):
     """
     Looks for games that have been flagged for an immediate release check,
     processes one, and then un-flags it.
+
+    FIXED: Now includes proper session management to avoid stale reads.
     """
     with app.app_context():
-        game_to_check = Game.query.filter_by(needs_release_check=True).first()
-        if game_to_check:
-            app.logger.info(f"Task Queue: Claiming '{game_to_check.official_title}' for an immediate release check.")
-            game_to_check.needs_release_check = False
-            db.session.commit()
+        try:
+            # Query for a game that needs a check
+            game_to_check = Game.query.filter_by(needs_release_check=True).order_by(Game.id).first()
             
-            # Call the single, powerful, unified engine
-            process_all_releases_for_game(game_to_check.id)
+            if game_to_check:
+                app.logger.info(f"Task Queue: Claiming '{game_to_check.official_title}' for an immediate release check.")
+                
+                # Immediately flip the flag and commit so other workers don't grab the same job.
+                game_to_check.needs_release_check = False
+                db.session.commit()
+                
+                # Now, run the potentially long-running process.
+                process_all_releases_for_game(game_to_check.id)
+            # Optional: Add an else block for debugging to confirm the job is running
+            # else:
+            #     app.logger.info("Task Queue: No games found needing an immediate release check.")
+
+        finally:
+            # THIS IS THE CRITICAL FIX:
+            # This ensures the database session is closed and removed at the end of the
+            # job's execution. The next run will get a fresh session.
+            db.session.remove()
 
 def scan_all_library_games(app):
     """
@@ -196,6 +214,108 @@ def update_download_statuses(app):
         except Exception as e:
             db.session.rollback()
             app.logger.error(f"Error in update_download_statuses: {e}")
+
+def auto_download_snatcher(app):
+    """
+    Scheduled job to automatically find and download releases based on user profiles.
+    This version includes a "claiming" mechanism to prevent race conditions.
+    """
+    with app.app_context():
+        settings = get_settings_dict()
+        if settings.get('auto_download_enabled') != 'true':
+            return
+
+        games_to_snatch = Game.query.join(Profile).filter(
+            Game.status.in_(['Cracked (Scene)', 'Cracked (P2P)'])
+        ).all()
+        
+        if not games_to_snatch:
+            return
+
+        app.logger.info(f"Auto-Snatcher: Found {len(games_to_snatch)} candidate(s) for automatic download.")
+
+        for game in games_to_snatch:
+            # --- THIS IS THE FIX: Claim the game immediately ---
+            original_status = game.status
+            game.status = 'Snatching'
+            db.session.commit()
+            app.logger.info(f"    -> Claiming '{game.official_title}' for snatching.")
+            # --- END OF FIX ---
+            
+            profile = game.profile
+            now = int(time.time())
+            
+            # 1. Check Delay
+            if game.release_found_timestamp:
+                elapsed_seconds = now - game.release_found_timestamp
+                if elapsed_seconds < (profile.delay_hours * 3600):
+                    app.logger.info(f"    -> '{game.official_title}' is waiting for delay. Reverting status.")
+                    game.status = original_status # Revert status if it's too early
+                    db.session.commit()
+                    continue
+            
+            # ... (Candidate building logic is unchanged) ...
+            candidates = []
+            if game.release_name:
+                 candidates.append({'name': game.release_name, 'group': game.release_group, 'type': game.release_type})
+            for alt in game.alternative_releases:
+                release_type = 'Repack' if alt.source.upper() in {'FITGIRL', 'DODI', 'ELAMIGOS'} else 'P2P'
+                if alt.source.upper() not in {'FITGIRL', 'DODI', 'ELAMIGOS'}:
+                    if '-' in alt.release_name and ' ' not in alt.release_name.split('-')[-1]:
+                         release_type = 'Scene'
+                candidates.append({'name': alt.release_name, 'group': alt.source, 'type': release_type})
+            
+            # ... (Filtering and scoring logic is unchanged) ...
+            best_candidate = None
+            highest_score = -1
+            profile_types = json.loads(profile.release_types)
+            profile_preferred = [g.upper() for g in json.loads(profile.preferred_groups)]
+            profile_avoided = [g.upper() for g in json.loads(profile.avoided_groups)]
+            for cand in candidates:
+                cand_group_upper = cand['group'].upper()
+                if cand['type'] not in profile_types: continue
+                if cand_group_upper in profile_avoided: continue
+                score = 0
+                if cand_group_upper in profile_preferred: score += 100
+                if score > highest_score:
+                    highest_score = score
+                    best_candidate = cand
+
+            # 4. Snatch the Best Match
+            if best_candidate:
+                app.logger.info(f"    -> Match found for '{game.official_title}': '{best_candidate['name']}' based on profile '{profile.name}'")
+                jackett_results = search_jackett(best_candidate['name'])
+                
+                if jackett_results:
+                    valid_torrents = [t for t in jackett_results if t.get('seeders', 0) != 0]
+                    if not valid_torrents:
+                         app.logger.warning(f"    -> No results with seeders found for '{best_candidate['name']}'. Reverting status.")
+                         game.status = original_status # Revert status
+                         db.session.commit()
+                         continue
+
+                    best_torrent = sorted(valid_torrents, key=lambda t: 9999 if t.get('seeders') == -1 else t.get('seeders', 0), reverse=True)[0]
+                    magnet_link = best_torrent['link']
+                    
+                    torrent_hash = add_to_qbittorrent(magnet_link)
+                    if torrent_hash:
+                        game.status = 'Snatched'
+                        game.torrent_hash = torrent_hash
+                        db.session.commit()
+                        app.logger.info(f"    SUCCESS: Snatched '{game.official_title}' and sent to qBittorrent.")
+                        time.sleep(1)
+                    else:
+                        app.logger.error(f"    ERROR: Failed to send '{game.official_title}' to qBittorrent. Reverting status.")
+                        game.status = original_status # Revert status
+                        db.session.commit()
+                else:
+                    app.logger.warning(f"    -> No results from Jackett for '{best_candidate['name']}'. Reverting status.")
+                    game.status = original_status # Revert status
+                    db.session.commit()
+            else:
+                app.logger.info(f"    -> No releases for '{game.official_title}' matched profile. Reverting status.")
+                game.status = original_status # Revert status
+                db.session.commit()
 
 def refresh_discover_cache(app):
     """Scheduled job to refresh the IGDB discover lists."""

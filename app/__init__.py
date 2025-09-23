@@ -49,8 +49,9 @@ def create_app(config_class=Config):
     from . import routes
     app.register_blueprint(routes.main)
     
-    from .util import timestamp_to_date_filter
+    from .util import timestamp_to_date_filter, fromjson_filter
     app.jinja_env.filters['timestamp_to_date'] = timestamp_to_date_filter
+    app.jinja_env.filters['fromjson'] = fromjson_filter
 
     with app.app_context():
         from . import models
@@ -67,6 +68,7 @@ def create_app(config_class=Config):
                 scheduler.add_job(func=jobs.process_release_check_queue, trigger="interval", seconds=10, id="release_queue_job", replace_existing=True, args=[app], max_instances=3)
                 scheduler.add_job(func=jobs.refresh_discover_cache, trigger="interval", hours=24, id="discover_refresh_job", replace_existing=True, args=[app])
                 scheduler.add_job(func=jobs.scan_all_library_games, trigger="interval", hours=12, id="additional_content_job", replace_existing=True, args=[app])
+                scheduler.add_job(func=jobs.auto_download_snatcher, trigger="interval", minutes=2, id="auto_snatcher_job", replace_existing=True, args=[app])
                 scheduler.start()
 
     return app

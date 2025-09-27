@@ -21,7 +21,9 @@ from .services import (
     update_discover_lists,
     process_all_releases_for_game,
     search_jackett,
-    add_to_qbittorrent
+    add_to_qbittorrent,
+    process_and_import_game,
+    process_and_import_addon
 )
 
 def check_for_releases(app):
@@ -154,61 +156,70 @@ def process_search_tasks(app):
             db.session.commit()
 
 def update_download_statuses(app):
-    """Scheduled job to check qBittorrent for download progress."""
+    """Scheduled job to check qBittorrent for download progress for BOTH games and addons."""
     with app.app_context():
+        # --- Find items to track ---
         games_to_track = Game.query.filter(
             Game.status.notin_(['Monitoring', 'Cracked', 'Imported']),
             Game.torrent_hash.isnot(None)
         ).all()
         
-        if not games_to_track:
+        addons_to_track = AdditionalRelease.query.filter(
+            AdditionalRelease.status.notin_(['Not Snatched', 'Imported']),
+            AdditionalRelease.torrent_hash.isnot(None)
+        ).all()
+        
+        if not games_to_track and not addons_to_track:
             return
 
-        games_by_hash = {g.torrent_hash: g for g in games_to_track}
-        
+        # --- Create lookup dictionaries ---
+        items_by_hash = {}
+        for g in games_to_track:
+            items_by_hash[g.torrent_hash] = g
+        for a in addons_to_track:
+            items_by_hash[a.torrent_hash] = a
+
         try:
             client = get_qbit_client()
-            torrents_info = client.torrents_info(torrent_hashes=list(games_by_hash.keys()))
+            torrents_info = client.torrents_info(torrent_hashes=list(items_by_hash.keys()))
             active_hashes = {t.hash for t in torrents_info}
 
             for torrent in torrents_info:
-                game = games_by_hash.get(torrent.hash)
-                if not game: continue
+                item = items_by_hash.get(torrent.hash)
+                if not item: continue
+                
+                # Skip items that are already fully processed
+                if item.status in ['Imported']:
+                    continue
 
-                new_status = game.status
+                new_status = item.status
                 if torrent.progress >= 1:
                     new_status = "Downloaded"
                 elif torrent.state in ['downloading', 'pausedDL', 'metaDL', 'stalledDL']:
                     new_status = f"Downloading {torrent.progress * 100:.0f}%"
                 elif torrent.state == 'error':
                     new_status = "Error"
-                else: # Covers seeding, stalledUP, queued, etc.
-                    new_status = torrent.state.capitalize()
-
-                if game.status != new_status:
-                    game.status = new_status
+                
+                if item.status != new_status:
+                    item.status = new_status
             
-            # Handle deleted torrents
-            deleted_hashes = set(games_by_hash.keys()) - active_hashes
+            # --- Handle deleted torrents for both types ---
+            deleted_hashes = set(items_by_hash.keys()) - active_hashes
             for dead_hash in deleted_hashes:
-                game = games_by_hash.get(dead_hash)
+                item = items_by_hash.get(dead_hash)
+                if not item: continue
 
-                # SCENARIO 1: The download was already complete. The job is done.
-                if game.status == 'Downloaded':
-                    app.logger.info(f"Torrent for '{game.official_title}' removed post-download. Final status remains 'Downloaded'.")
-                    game.torrent_hash = None
-                    continue
-
-                # SCENARIO 2: The download was aborted before completion. Revert to 'Cracked'.
-                app.logger.warning(f"Torrent for '{game.official_title}' (Status: {game.status}) removed before completion. Reverting to available state.")
+                if isinstance(item, Game):
+                    # Revert a Game to its "Cracked" status
+                    if item.release_type == 'Scene':
+                        item.status = 'Cracked (Scene)'
+                    else:
+                        item.status = 'Cracked (P2P)'
+                elif isinstance(item, AdditionalRelease):
+                    # Revert an Addon to "Not Snatched"
+                    item.status = 'Not Snatched'
                 
-                # Use our stored release_type to revert to the correct status
-                if game.release_type == 'Scene':
-                    game.status = 'Cracked (Scene)'
-                else: # 'P2P' and 'Repack' both revert to P2P status
-                    game.status = 'Cracked (P2P)'
-                
-                game.torrent_hash = None
+                item.torrent_hash = None
             
             db.session.commit()
         except Exception as e:
@@ -316,6 +327,50 @@ def auto_download_snatcher(app):
                 app.logger.info(f"    -> No releases for '{game.official_title}' matched profile. Reverting status.")
                 game.status = original_status # Revert status
                 db.session.commit()
+
+def process_completed_downloads(app):
+    """
+    Scheduled job to find 'Downloaded' games OR addons and hand them off to the correct importer.
+    Processes one item per run to avoid overload.
+    """
+    with app.app_context():
+        # --- THIS IS THE NEW LOGIC ---
+        settings = get_settings_dict()
+        import_mode = settings.get('import_mode', 'Move') # Default to 'Move' if not set
+
+        if import_mode == 'None':
+            # If the importer is disabled, do nothing.
+            return 
+        # --- END OF NEW LOGIC ---
+
+        # --- Priority 1: Process a completed base game ---
+        game_to_process = Game.query.filter_by(status='Downloaded').first()
+        if game_to_process:
+            app.logger.info(f"Post-Processor: Found downloaded game '{game_to_process.official_title}'. Claiming...")
+            game_to_process.status = 'Importing'
+            db.session.commit()
+            try:
+                process_and_import_game(game_to_process.id)
+            except Exception as e:
+                app.logger.error(f"A critical error occurred during game import for '{game_to_process.official_title}'. Reverting status. Error: {e}")
+                game = Game.query.get(game_to_process.id)
+                if game and game.status == 'Importing': # Check status to avoid race conditions
+                    game.status = 'Downloaded'
+                    db.session.commit()
+            return # Exit after processing one item
+
+        # --- Priority 2: Process a completed addon ---
+        addon_to_process = AdditionalRelease.query.filter_by(status='Downloaded').first()
+        if addon_to_process:
+            app.logger.info(f"Post-Processor: Found downloaded addon '{addon_to_process.release_name}'. Claiming...")
+            addon_to_process.status = 'Installing'
+            db.session.commit()
+            try:
+                process_and_import_addon(addon_to_process.id)
+            except Exception as e:
+                # The addon engine handles its own status reversion
+                app.logger.error(f"A critical error occurred during addon import for '{addon_to_process.release_name}'.")
+            return # Exit after processing one item
 
 def refresh_discover_cache(app):
     """Scheduled job to refresh the IGDB discover lists."""

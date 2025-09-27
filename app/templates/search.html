@@ -35,6 +35,11 @@
                 <form action="{{ url_for('main.download') }}" method="post" class="download-form">
                     <input type="hidden" name="magnet_link" value="{{ result.link }}">
                     <input type="hidden" name="game_id" value="{{ game.id }}">
+
+                    {% if additional_release_id %}
+                        <input type="hidden" name="additional_release_id" value="{{ additional_release_id }}">
+                    {% endif %}
+
                     <button type="submit" class="btn btn-download">Download</button>
                 </form>
             </div>

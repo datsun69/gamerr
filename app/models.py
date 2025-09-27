@@ -65,7 +65,8 @@ class AdditionalRelease(db.Model):
     status = db.Column(db.String, default='Not Snatched', nullable=False)
     source = db.Column(db.String(50), nullable=True)
     
-    # This is the foreign key that links it back to the base game
+    torrent_hash = db.Column(db.String, nullable=True)
+    
     game_id = db.Column(db.Integer, db.ForeignKey('game.id'), nullable=False)
 
 class Setting(db.Model):

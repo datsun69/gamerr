@@ -154,7 +154,7 @@
         
         
                     <div class="release-actions">
-                        <a href="{{ url_for('main.interactive_search', game_id=game.id, q=release.release_name) }}" class="btn btn-primary btn-sm" title="Search for this release">
+                        <a href="{{ url_for('main.interactive_search', game_id=game.id, q=release.release_name, additional_release_id=release.id) }}" class="btn btn-primary btn-sm" title="Search for this release">
                             <span class="material-symbols-outlined">search</span> Search
                         </a>
                     </div>

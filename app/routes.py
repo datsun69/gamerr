@@ -8,9 +8,11 @@ import os
 from datetime import timedelta
 import time
 import re
+import shutil
+from pathlib import Path
 
 from . import db
-from .models import Game, Setting, SearchTask, DiscoverCache, Indexer, Profile
+from .models import Game, Setting, SearchTask, DiscoverCache, Indexer, Profile, AdditionalRelease
 from .services import search_jackett, add_to_qbittorrent, get_qbit_client, process_library_scan, get_igdb_game_details, _refine_search_term
 
 main = Blueprint('main', __name__)
@@ -181,33 +183,78 @@ def library_scan():
     scan_results = process_library_scan()
     return jsonify(scan_results)
 
+    
 @main.route('/library/import/confirm', methods=['POST'])
 def library_import_confirm():
-    """Receives a confirmed match from the UI and adds it to the database."""
+    """
+    Receives a confirmed match, manages folder structure, and adds it to the database.
+    Now intelligently handles re-importing of already-processed folders.
+    """
     data = request.get_json()
     igdb_id = str(data.get('igdb_id'))
+    original_folder_name = data.get('folder_name')
 
-    # Check if this game is already in the database
     exists = Game.query.filter(
         (Game.igdb_id == igdb_id) | 
-        (Game.local_path == data.get('folder_name'))
+        (Game.local_path == original_folder_name)
     ).first()
-
     if exists:
         return jsonify({'error': 'Game already exists in the database.'}), 409
 
-    # --- NEW: Fetch the full, rich details from IGDB ---
     game_details = get_igdb_game_details(igdb_id)
     if not game_details:
         return jsonify({'error': 'Could not fetch full game details from IGDB.'}), 500
 
-    # Create the new game using the complete dataset
+    library_path = Path(current_app.config['LIBRARY_PATH'])
+    original_path = library_path / original_folder_name
+    
+    clean_title = "".join(c for c in game_details['official_title'] if c.isalnum() or c in (' ', '.', '-')).rstrip()
+    new_parent_path = library_path / clean_title
+
+    # --- THIS IS THE NEW, SMARTER LOGIC ---
+    
+    # CASE 1: The target folder already exists.
+    if new_parent_path.exists():
+        # Check if this is a simple re-import of an already-correct folder.
+        if original_path == new_parent_path:
+            current_app.logger.info(f"Library Import: Folder '{clean_title}' already exists and is correctly named. Re-linking.")
+            # Do nothing and proceed to database creation.
+        else:
+            # This is a true conflict (e.g., trying to import "Game-FLT" but "Game" folder already exists).
+            return jsonify({'error': f"Cannot import because a folder named '{clean_title}' already exists."}), 409
+
+    # CASE 2: The original folder is already named perfectly.
+    elif original_path == new_parent_path:
+        current_app.logger.info(f"Library Import: Folder '{original_folder_name}' is already named correctly. No move needed.")
+        # Do nothing and proceed to database creation.
+    
+    # CASE 3: The standard case - move the folder.
+    else:
+        try:
+            current_app.logger.info(f"Library Import: Creating new directory '{new_parent_path}' and moving contents...")
+            os.makedirs(new_parent_path)
+            shutil.move(original_path, new_parent_path)
+            current_app.logger.info("Library Import: Folder move successful.")
+        except Exception as e:
+            current_app.logger.error(f"Library Import: Failed to move folder: {e}")
+            # Attempt to clean up an empty parent folder if the move failed
+            if new_parent_path.exists() and not any(new_parent_path.iterdir()):
+                os.rmdir(new_parent_path)
+            return jsonify({'error': f"Could not move folder: {e}"}), 500
+    # --- END OF NEW LOGIC ---
+
     new_game = Game(**game_details)
-    
-    # Set the status and local path specific to an imported game
     new_game.status = 'Imported'
-    new_game.local_path = data.get('folder_name')
+    new_game.local_path = clean_title
     
+    # IMPORTANT: We need to figure out the original release name for re-linked folders.
+    # We can check if a single sub-directory exists in the re-linked folder.
+    sub_dirs = [d for d in new_parent_path.iterdir() if d.is_dir()]
+    if original_path == new_parent_path and len(sub_dirs) == 1:
+        new_game.release_name = sub_dirs[0].name
+    else:
+        new_game.release_name = original_folder_name
+
     db.session.add(new_game)
     db.session.commit()
     
@@ -218,6 +265,8 @@ def library_import_confirm():
 def interactive_search(game_id):
     game = Game.query.get_or_404(game_id)
     
+    additional_release_id = request.args.get('additional_release_id', type=int)
+
     # 1. Determine the initial, potentially "raw" term from the request
     initial_term = ""
     if request.method == 'POST':
@@ -236,20 +285,35 @@ def interactive_search(game_id):
     
     # 3. Use the single refined term for both the Jackett search and for populating the template.
     jackett_results = search_jackett(search_term)
-    return render_template('search.html', game=game, results=jackett_results, search_term=search_term)
+    return render_template('search.html', game=game, results=jackett_results, search_term=search_term, additional_release_id=additional_release_id)
 
 @main.route('/download', methods=['POST'])
 def download():
     game_id = request.form['game_id']
     magnet_link = request.form['magnet_link']
-    game = Game.query.get_or_404(game_id)
-    
+    additional_release_id = request.form.get('additional_release_id', type=int)
+
     torrent_hash = add_to_qbittorrent(magnet_link)
+    
     if torrent_hash:
-        game.status = 'Snatched'
-        game.torrent_hash = torrent_hash
+        if additional_release_id:
+            # This is an addon download
+            addon = AdditionalRelease.query.get(additional_release_id)
+            if addon:
+                addon.status = 'Snatched'
+                addon.torrent_hash = torrent_hash
+                flash(f"Addon '{addon.release_name}' has been snatched.", "success")
+        else:
+            # This is a base game download
+            game = Game.query.get_or_404(game_id)
+            game.status = 'Snatched'
+            game.torrent_hash = torrent_hash
+            flash(f"'{game.official_title}' has been snatched.", "success")
+        
         db.session.commit()
-    return redirect(url_for('main.index'))
+
+    # Redirect back to the game detail page, which is more useful
+    return redirect(url_for('main.game_detail', game_id=game_id))
 
 @main.route('/game/status/<int:game_id>')
 def get_game_status(game_id):

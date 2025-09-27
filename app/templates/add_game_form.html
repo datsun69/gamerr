@@ -7,17 +7,15 @@
     
     <!-- Section 1: Search by Title -->
     <div class="content-card">
-        
-            <h2>Search by Title</h2>
-            <p>Find a game by searching the IGDB database.</p>
-            <form action="{{ url_for('main.add_game_search') }}" method="post">
-                <label for="game_title">Game Title</label>
-                <input type="text" name="game_title" id="game_title" class="form-control" required>            
+        <h2>Search by Title</h2>
+        <p>Find a game by searching the IGDB database.</p>
+        <form action="{{ url_for('main.add_game_search') }}" method="post">
+            <label for="game_title">Game Title</label>
+            <input type="text" name="game_title" id="game_title" class="form-control" required>            
 
-                <button type="submit" class="btn btn-blue"><span class="material-symbols-outlined">search</span>  Search IGDB</button>
-            </form>
-
-    </div>
+            <button type="submit" class="btn btn-blue"><span class="material-symbols-outlined">search</span>  Search IGDB</button>
+        </form>
+</div>
 
     <!-- Section 2: Import from Folder (NEW) -->
     <details class="content-card">
@@ -198,133 +196,143 @@
 
 <!-- We will add the JavaScript at the end of the content block -->
 <script>
-const scanBtn = document.getElementById('scan-library-btn');
-const resultsDiv = document.getElementById('import-results');
-const spinner = document.getElementById('loading-spinner');
+    const scanBtn = document.getElementById('scan-library-btn');
+    const resultsDiv = document.getElementById('import-results');
+    const spinner = document.getElementById('loading-spinner');
 
-scanBtn.addEventListener('click', async () => {
-    // Show spinner and clear previous results
-    spinner.style.display = 'block';
-    resultsDiv.innerHTML = '';
-    scanBtn.disabled = true;
-
-    try {
-        const response = await fetch("{{ url_for('main.library_scan') }}", {
-            method: 'POST'
-        });
-        const scanResults = await response.json();
-
-        // Hide spinner
-        spinner.style.display = 'none';
-        scanBtn.disabled = false;
-
-        if (scanResults.length === 0) {
-            resultsDiv.innerHTML = '<p>No new game folders found in your library.</p>';
-            return;
-        }
-
-        // Build the results table
-        let tableHTML = `
-            <table class="results-table">
-                <thead>
-                    <tr>
-                        <th>Folder Name</th>
-                        <th>Best IGDB Match</th>
-                        <th>Action</th>
-                    </tr>
-                </thead>
-                <tbody>
-        `;
-        
-        scanResults.forEach((item, index) => {
-            tableHTML += `
-                <tr>
-                    <td>${item.folder_name}</td>
-                    <td>
-                        <select id="match-select-${index}" class="form-control">
-            `;
-            if (item.igdb_matches.length > 0) {
-                item.igdb_matches.forEach(match => {
-                    // We store all the data we need in the option's value attribute
-                    const matchData = JSON.stringify({
-                        id: match.id,
-                        title: match.name,
-                        cover: match.cover_url,
-                        date: match.release_timestamp
-                    });
-                    tableHTML += `<option value='${matchData}'>${match.name}</option>`;
-                });
-            } else {
-                tableHTML += `<option value="">No matches found</option>`;
-            }
-            tableHTML += `
-                        </select>
-                    </td>
-                    <td>
-                        <button class="btn btn-pink import-btn" 
-                                data-index="${index}" 
-                                data-folder="${item.folder_name}"
-                                ${item.igdb_matches.length === 0 ? 'disabled' : ''}>
-                            Import
-                        </button>
-                    </td>
-                </tr>
-            `;
-        });
-
-        tableHTML += `</tbody></table>`;
-        resultsDiv.innerHTML = tableHTML;
-
-    } catch (error) {
-        spinner.style.display = 'none';
-        scanBtn.disabled = false;
-        resultsDiv.innerHTML = '<p class="error">An error occurred while scanning.</p>';
-        console.error('Scan failed:', error);
+    function getCleanTitle(title) {
+        if (!title) return '';
+        return title.replace(/[^\w\s.-]/g, '').trim();
     }
-});
 
-// Event delegation for the import buttons
-resultsDiv.addEventListener('click', async (event) => {
-    if (event.target.classList.contains('import-btn')) {
-        const button = event.target;
-        const index = button.dataset.index;
-        const folderName = button.dataset.folder;
-        
-        const select = document.getElementById(`match-select-${index}`);
-        const selectedMatchData = JSON.parse(select.value);
-
-        // Disable button to prevent double-clicks
-        button.disabled = true;
-        button.textContent = 'Importing...';
+    scanBtn.addEventListener('click', async () => {
+        spinner.style.display = 'block';
+        resultsDiv.innerHTML = '';
+        scanBtn.disabled = true;
 
         try {
-            const importResponse = await fetch("{{ url_for('main.library_import_confirm') }}", {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    folder_name: folderName,
-                    igdb_id: selectedMatchData.id,
-                    official_title: selectedMatchData.title,
-                    cover_url: selectedMatchData.cover,
-                    release_timestamp: selectedMatchData.date
-                })
-            });
-            
-            if (importResponse.ok) {
-                // Success! Remove the row from the table
-                button.closest('tr').remove();
-            } else {
-                // Handle error
-                button.textContent = 'Error!';
-                button.classList.remove('btn-pink');
-                button.classList.add('btn-danger');
+            const response = await fetch("{{ url_for('main.library_scan') }}", { method: 'POST' });
+            const scanResults = await response.json();
+            spinner.style.display = 'none';
+            scanBtn.disabled = false;
+
+            if (scanResults.length === 0) {
+                resultsDiv.innerHTML = '<p>No new game folders found in your library.</p>';
+                return;
             }
 
+            let tableHTML = `
+                <table class="results-table">
+                    <thead>
+                        <tr>
+                            <th>Original Folder</th>
+                            <th>Best IGDB Match</th>
+                            <th>New Folder Name (On Import)</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+            
+            scanResults.forEach((item, index) => {
+                const bestMatch = item.igdb_matches.length > 0 ? item.igdb_matches[0] : null;
+                const newFolderName = bestMatch ? getCleanTitle(bestMatch.name) : 'N/A';
+
+                tableHTML += `
+                    <tr>
+                        <td>${item.folder_name}</td>
+                        <td>
+                            <select id="match-select-${index}" class="form-control" onchange="updateNewName(${index})">
+                `;
+                if (item.igdb_matches.length > 0) {
+                    item.igdb_matches.forEach(match => {
+                        const matchData = JSON.stringify({
+                            id: match.id,
+                            title: match.name
+                        });
+                        tableHTML += `<option value='${matchData}'>${match.name}</option>`;
+                    });
+                } else {
+                    tableHTML += `<option value="">No matches found</option>`;
+                }
+                tableHTML += `
+                            </select>
+                        </td>
+                        <td id="new-name-cell-${index}">${newFolderName}</td>
+                        <td>
+                            <button class="btn btn-pink import-btn" 
+                                    data-index="${index}" 
+                                    data-folder="${item.folder_name}"
+                                    ${item.igdb_matches.length === 0 ? 'disabled' : ''}>
+                                Import
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            tableHTML += `</tbody></table>`;
+            resultsDiv.innerHTML = tableHTML;
+
         } catch (error) {
-            console.error('Import failed:', error);
-            button.textContent = 'Error!';
+            spinner.style.display = 'none';
+            scanBtn.disabled = false;
+            resultsDiv.innerHTML = '<p class="error">An error occurred while scanning.</p>';
+            console.error('Scan failed:', error);
+        }
+    });
+
+    function updateNewName(index) {
+        const select = document.getElementById(`match-select-${index}`);
+        const newNameCell = document.getElementById(`new-name-cell-${index}`);
+        
+        if (select.value) {
+            const selectedMatchData = JSON.parse(select.value);
+            newNameCell.textContent = getCleanTitle(selectedMatchData.title);
+        } else {
+            newNameCell.textContent = 'N/A';
         }
     }
-});
-</script>
-{% endblock %}
+
+    resultsDiv.addEventListener('click', async (event) => {
+        if (event.target.classList.contains('import-btn')) {
+            const button = event.target;
+            const index = button.dataset.index;
+            const folderName = button.dataset.folder;
+            
+            const select = document.getElementById(`match-select-${index}`);
+            const selectedMatchData = JSON.parse(select.value);
+
+            button.disabled = true;
+            button.textContent = 'Importing...';
+
+            try {
+                const importResponse = await fetch("{{ url_for('main.library_import_confirm') }}", {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        folder_name: folderName,
+                        igdb_id: selectedMatchData.id,
+                        official_title: selectedMatchData.title,
+                        cover_url: selectedMatchData.cover,
+                        release_timestamp: selectedMatchData.date
+                    })
+                });
+                
+                if (importResponse.ok) {
+                    button.closest('tr').remove();
+                } else {
+                    button.textContent = 'Error!';
+                    button.classList.remove('btn-pink');
+                    button.classList.add('btn-danger');
+                }
+
+            } catch (error) {
+                console.error('Import failed:', error);
+                button.textContent = 'Error!';
+            }
+        }
+    });
+    </script>
+
+{% endblock %}    

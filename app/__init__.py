@@ -69,6 +69,7 @@ def create_app(config_class=Config):
                 scheduler.add_job(func=jobs.refresh_discover_cache, trigger="interval", hours=24, id="discover_refresh_job", replace_existing=True, args=[app])
                 scheduler.add_job(func=jobs.scan_all_library_games, trigger="interval", hours=12, id="additional_content_job", replace_existing=True, args=[app])
                 scheduler.add_job(func=jobs.auto_download_snatcher, trigger="interval", minutes=2, id="auto_snatcher_job", replace_existing=True, args=[app])
+                scheduler.add_job(func=jobs.process_completed_downloads, trigger="interval", minutes=10, id="importer_job", replace_existing=True, args=[app])
                 scheduler.start()
 
     return app

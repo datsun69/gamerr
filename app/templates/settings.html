@@ -145,11 +145,13 @@
         <summary class="collapsible-header">
             <div>
             <h2>qBittorrent</h2>
-            <p>Your download client.</p>
+            <p>Your download client and post-processing settings.</p>
             </div>
             <span class="material-symbols-outlined collapsible-icon">keyboard_arrow_down</span>
         </summary>
         <div class="details-content">
+            
+            <h3>Connection</h3>
             <label for="qbittorrent_host">Host (e.g., localhost)</label><br>
             <input type="text" id="qbittorrent_host" name="qbittorrent_host" value="{{ settings.qbittorrent_host or '' }}" size="50"><br><br>
             <label for="qbittorrent_port">Port (e.g., 8080)</label><br>
@@ -159,7 +161,52 @@
             <label for="qbittorrent_pass">Password</label><br>
             <input type="password" id="qbittorrent_pass" name="qbittorrent_pass" value="{{ settings.qbittorrent_pass or '' }}" size="50"><br><br>
             <label for="qbittorrent_category">Category</label><br>
-            <input type="text" id="qbittorrent_category" name="qbittorrent_category" value="{{ settings.qbittorrent_category or '' }}" size="50">
+            <input type="text" id="qbittorrent_category" name="qbittorrent_category" value="{{ settings.qbittorrent_category or '' }}" size="50"><br><br>
+
+            <!-- NEW POST-PROCESSING SECTION -->
+            <h3 style="margin-top: 2rem;">Post-Processing</h3>
+            <div class="form-group">
+                <label for="import_mode">Import Mode</label>
+                <select name="import_mode" id="import_mode">
+                    <option value="None" {% if settings.import_mode == 'None' %}selected{% endif %}>None (Disable Importer)</option>
+                    <option value="Copy" {% if settings.import_mode == 'Copy' %}selected{% endif %}>Copy</option>
+                    <option value="Move" {% if settings.import_mode == 'Move' %}selected{% endif %}>Move</option>
+                </select>
+                <small>
+                    <b>None:</b> Disables all automatic importing. Files will remain in your download folder.
+                    <br>                    
+                    <b>Copy:</b> Immediately copies/unrars to your library to play, leaves original files to seed. Uses more disk space temporarily.
+                    <br>
+                    <b>Move:</b> Waits for seeding goals, then moves/unrars to your library. Uses less disk space.
+                </small>
+            </div>
+            <br>
+            
+            <h4>Seeding Goals</h4>
+            <small>When a torrent meets these goals, it will be removed from qBittorrent (after import). Set to 0 to disable a check.</small>
+            <div class="form-group form-group-inline">
+                <label for="seed_time_days">Seed Time (Days)</label>
+                <input type="number" id="seed_time_days" name="seed_time_days" min="0" value="{{ settings.seed_time_days or '0' }}" style="width: 100px;">
+            </div>
+            
+            <div class="form-group form-group-inline">
+                <label for="seed_ratio">Ratio</label>
+                <input type="number" id="seed_ratio" name="seed_ratio" min="0" step="0.1" value="{{ settings.seed_ratio or '0' }}" style="width: 100px;">
+            </div>
+
+            <h3 style="margin-top: 2rem;">Path Mappings</h3>
+            <small>If Gamerr runs on a different machine or in a different environment than your download client, you may need to map paths.</small>
+            <div class="form-group">
+                <label for="qbit_remote_path">Remote Path</label>
+                <input type="text" id="qbit_remote_path" name="qbit_remote_path" value="{{ settings.qbit_remote_path or '' }}" size="50">
+                <small>The path as your download client sees it (e.g., <code>/downloads</code> or <code>/data/torrents</code>).</small>
+            </div>
+            <div class="form-group">
+                <label for="qbit_local_path">Local Path</label>
+                <input type="text" id="qbit_local_path" name="qbit_local_path" value="{{ settings.qbit_local_path or '' }}" size="50">
+                <small>The same path as Gamerr sees it (e.g., <code>D:\Downloads</code> or <code>\\server\downloads</code>).</small>
+            </div>            
+
         </div>
     </details>
 

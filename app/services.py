@@ -11,6 +11,7 @@ import urllib.parse
 import subprocess
 import sys
 import html
+import shutil
 
 # --- Third-Party Library Imports ---
 import requests
@@ -22,6 +23,7 @@ import xml.etree.ElementTree as ET
 import unicodedata
 from urllib3.util.retry import Retry
 from requests.adapters import HTTPAdapter
+from pathlib import Path
 
 # --- Local Application Imports ---
 from . import db
@@ -393,21 +395,46 @@ def get_qbit_client():
         return None
 
 def add_to_qbittorrent(magnet_link):
-    """Adds a magnet link to qBittorrent and returns the torrent hash."""
+    """
+    Adds a magnet link to qBittorrent and reliably returns the new torrent's hash.
+    (Version 2: Now uses a hash comparison method to be immune to race conditions)
+    """
     settings = get_settings_dict()
     try:
         client = get_qbit_client()
+        if not client:
+            raise Exception("Could not get qBittorrent client.")
+
+        # 1. Get the set of all torrent hashes that currently exist
+        existing_hashes = {t.hash for t in client.torrents_info()}
+
+        # 2. Add the new torrent
         category = settings.get('qbittorrent_category')
         result = client.torrents_add(urls=magnet_link, category=category, tags="gamearr")
 
         if result != "Ok.":
             current_app.logger.error(f"Failed to add torrent to qBittorrent: {result}")
             return None
-        time.sleep(2)
-        added_torrents = client.torrents_info(tag="gamearr", category=category, sort='added_on', reverse=True)
-        return added_torrents[0].hash if added_torrents else None
+
+        # 3. Poll for a few seconds to find the new hash
+        time.sleep(1) # Initial delay
+        for _ in range(5): # Try for up to 5 seconds
+            new_hashes = {t.hash for t in client.torrents_info()}
+            added_hash_set = new_hashes - existing_hashes
+            
+            if added_hash_set:
+                new_hash = added_hash_set.pop()
+                current_app.logger.info(f"    -> Successfully identified new torrent hash: {new_hash}")
+                return new_hash
+            
+            time.sleep(1) # Wait and try again
+
+        # 4. If the hash is still not found, something went wrong
+        current_app.logger.error("Failed to identify new torrent hash after adding. The torrent may have failed to resolve.")
+        return None
+
     except Exception as e:
-        current_app.logger.error(f"An unexpected qBittorrent error occurred: {e}")
+        current_app.logger.error(f"An unexpected qBittorrent error occurred in add_to_qbittorrent: {e}")
         return None
 
 def check_source_rss(feed_url, game_title):
@@ -749,6 +776,262 @@ def process_library_scan():
             'igdb_matches': igdb_matches
         })
     return results
+
+def process_and_import_game(game_id):
+    """
+    The engine that handles the post-processing and import of a single downloaded game.
+    (Version 5: Final version with NFO handling and improved folder structure)
+    """
+    game = Game.query.get(game_id)
+    if not game or game.status != 'Importing' or not game.torrent_hash:
+        return
+
+    current_app.logger.info(f"Importer: Starting processing for '{game.official_title}'...")
+    settings = get_settings_dict()
+    qbit_client = get_qbit_client()
+
+    try:
+        torrents = qbit_client.torrents_info(torrent_hashes=game.torrent_hash)
+        if not torrents:
+            # Revert status if torrent is missing
+            game.status = 'Downloaded'
+            game.torrent_hash = None
+            db.session.commit()
+            current_app.logger.warning(f"Importer: Torrent for '{game.official_title}' not found. Reverting status.")
+            return
+
+        torrent_info = torrents[0]
+        
+        # ... (Seeding Goals logic is unchanged) ...
+        import_mode = settings.get('import_mode', 'Move')
+        seed_time_days = int(settings.get('seed_time_days', 0))
+        seed_ratio = float(settings.get('seed_ratio', 0.0))
+        seeding_time_met = (seed_time_days == 0) or (torrent_info.seeding_time / 86400 >= seed_time_days)
+        ratio_met = (seed_ratio == 0.0) or (torrent_info.ratio >= seed_ratio)
+        goals_met = seeding_time_met and ratio_met
+
+        if import_mode == 'Move' and not goals_met:
+            current_app.logger.info(f"    -> Seeding goals not met for '{game.official_title}'. Reverting status to check again later.")
+            game.status = 'Downloaded' # Revert status so the job picks it up again
+            db.session.commit()
+            return
+            
+        # --- Path Translation (from previous fix) ---
+        remote_path = settings.get('qbit_remote_path')
+        local_path = settings.get('qbit_local_path')
+        raw_save_path = torrent_info.save_path
+        translated_save_path_str = raw_save_path
+        if remote_path and local_path:
+            normalized_raw = raw_save_path.replace('\\', '/')
+            normalized_remote = remote_path.replace('\\', '/')
+            if normalized_raw.startswith(normalized_remote):
+                translated_save_path_str = raw_save_path.replace(remote_path, local_path, 1)
+                current_app.logger.info(f"    -> Path translated: '{raw_save_path}' -> '{translated_save_path_str}'")
+        save_path = Path(translated_save_path_str)
+        
+        # --- NEW & IMPROVED FOLDER STRUCTURE ---
+        library_path = Path(current_app.config['LIBRARY_PATH'])
+        clean_title = "".join(c for c in game.official_title if c.isalnum() or c in (' ', '.', '-')).rstrip()
+        dest_root_path = library_path / clean_title # e.g., /games/The Precinct/
+        dest_game_path = dest_root_path / (game.release_name or torrent_info.name) # e.g., /games/The Precinct/The.Precinct-RUNE/
+
+        qbit_client.torrents_pause(torrent_hashes=torrent_info.hash)
+        current_app.logger.info(f"    -> Paused torrent for processing.")
+        
+        torrent_files = qbit_client.torrents_files(torrent_hash=torrent_info.hash)
+        is_scene_release = any(f.name.lower().endswith('.rar') for f in torrent_files)
+        
+        import_source = save_path / torrent_info.name
+        temp_extract_path = save_path / f"_temp_extract_{game.id}"
+
+        if is_scene_release:
+            current_app.logger.info(f"    -> Scene release detected. Attempting to unrar.")
+            os.makedirs(temp_extract_path, exist_ok=True)
+            main_rar_file = next((f for f in torrent_files if f.name.lower().endswith('.rar')), None)
+            
+            if main_rar_file:
+                rar_file_path = save_path / main_rar_file.name
+                command = ['unrar', 'x', '-o+', str(rar_file_path), str(temp_extract_path)]
+                result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', errors='ignore')
+
+                if result.returncode != 0:
+                    raise Exception(f"Unrar failed for {rar_file_path}: {result.stdout} {result.stderr}")
+                
+                current_app.logger.info(f"    -> Unrar successful.")
+                import_source = temp_extract_path
+        
+        current_app.logger.info(f"    -> Importing game files from '{import_source}' to '{dest_game_path}'...")
+        os.makedirs(dest_game_path, exist_ok=True)
+        shutil.copytree(import_source, dest_game_path, dirs_exist_ok=True)
+        current_app.logger.info(f"    -> Game file import complete.")
+
+        # --- NEW NFO HANDLING LOGIC ---
+        nfo_file = next((f for f in torrent_files if f.name.lower().endswith('.nfo')), None)
+        if nfo_file:
+            source_nfo_path = save_path / nfo_file.name
+            dest_nfo_path = dest_game_path / os.path.basename(nfo_file.name)
+            try:
+                shutil.copy2(source_nfo_path, dest_nfo_path)
+                current_app.logger.info(f"    -> NFO file copied to destination.")
+            except Exception as e:
+                current_app.logger.warning(f"    -> Could not copy NFO file: {e}")
+        # --- END NFO HANDLING ---
+        
+        if temp_extract_path.exists():
+            shutil.rmtree(temp_extract_path)
+
+        # ... (Finalize and Cleanup logic is unchanged) ...
+        should_delete = False
+        if import_mode == 'Copy' and goals_met:
+            should_delete = True
+        elif import_mode == 'Move':
+            should_delete = True
+        else:
+            qbit_client.torrents_resume(torrent_hashes=torrent_info.hash)
+        
+        if should_delete:
+            current_app.logger.info(f"    -> Deleting torrent and original files from qBittorrent.")
+            qbit_client.torrents_delete(delete_files=True, torrent_hashes=torrent_info.hash)
+            game.torrent_hash = None
+
+        # --- Update Database on SUCCESS ---
+        game.status = 'Imported'
+        game.local_path = clean_title
+        db.session.commit()
+        current_app.logger.info(f"Importer: SUCCESS! '{game.official_title}' has been imported to the library.")
+
+    except Exception as e:
+        # On failure, revert the status and resume the torrent
+        current_app.logger.error(f"Importer: A failure occurred while processing '{game.official_title}': {e}")
+        game.status = 'Downloaded'
+        db.session.commit()
+        if qbit_client:
+            qbit_client.torrents_resume(torrent_hashes=game.torrent_hash)
+        raise e
+
+def process_and_import_addon(addon_id):
+    """
+    The engine that handles the post-processing and import of a single downloaded addon.
+    (Version 2: Now with NFO handling and consistent status)
+    """
+    addon = AdditionalRelease.query.get(addon_id)
+    if not addon or addon.status != 'Installing' or not addon.torrent_hash:
+        return
+
+    game = addon.game
+    if not game or not game.local_path:
+        raise Exception(f"Cannot import addon '{addon.release_name}' because its parent game has not been imported yet.")
+
+    current_app.logger.info(f"Importer: Starting processing for addon '{addon.release_name}'...")
+    settings = get_settings_dict()
+    qbit_client = get_qbit_client()
+
+    try:
+        torrents = qbit_client.torrents_info(torrent_hashes=addon.torrent_hash)
+        if not torrents:
+            addon.status = 'Downloaded'
+            addon.torrent_hash = None
+            db.session.commit()
+            current_app.logger.warning(f"Importer: Torrent for addon '{addon.release_name}' not found. Reverting status.")
+            return
+
+        torrent_info = torrents[0]
+        
+        # --- REUSE THE EXACT SAME SEEDING RULES ---
+        import_mode = settings.get('import_mode', 'Move')
+        seed_time_days = int(settings.get('seed_time_days', 0))
+        seed_ratio = float(settings.get('seed_ratio', 0.0))
+        seeding_time_met = (seed_time_days == 0) or (torrent_info.seeding_time / 86400 >= seed_time_days)
+        ratio_met = (seed_ratio == 0.0) or (torrent_info.ratio >= seed_ratio)
+        goals_met = seeding_time_met and ratio_met
+
+        if import_mode == 'Move' and not goals_met:
+            current_app.logger.info(f"    -> Seeding goals not met for addon '{addon.release_name}'. Reverting status.")
+            addon.status = 'Downloaded'
+            db.session.commit()
+            return
+            
+        # --- Path Translation (Reused Logic) ---
+        remote_path = settings.get('qbit_remote_path')
+        local_path = settings.get('qbit_local_path')
+        raw_save_path = torrent_info.save_path
+        translated_save_path_str = raw_save_path
+        if remote_path and local_path:
+            normalized_raw = raw_save_path.replace('\\', '/')
+            normalized_remote = remote_path.replace('\\', '/')
+            if normalized_raw.startswith(normalized_remote):
+                translated_save_path_str = raw_save_path.replace(remote_path, local_path, 1)
+        save_path = Path(translated_save_path_str)
+        
+        # --- ADDON-SPECIFIC FOLDER STRUCTURE ---
+        library_path = Path(current_app.config['LIBRARY_PATH'])
+        dest_root_path = library_path / game.local_path # e.g., /games/The Precinct/
+        dest_addon_path = dest_root_path / '_addons' / addon.release_name # e.g., .../_addons/The.Precinct.Update-RUNE/
+
+        qbit_client.torrents_pause(torrent_hashes=torrent_info.hash)
+        torrent_files = qbit_client.torrents_files(torrent_hash=torrent_info.hash)
+        is_scene_release = any(f.name.lower().endswith('.rar') for f in torrent_files)
+        
+        import_source = save_path / torrent_info.name
+        temp_extract_path = save_path / f"_temp_extract_addon_{addon.id}"
+
+        if is_scene_release:
+            # --- REUSE THE EXACT SAME UNRAR LOGIC ---
+            current_app.logger.info(f"    -> Scene addon detected. Attempting to unrar.")
+            os.makedirs(temp_extract_path, exist_ok=True)
+            main_rar_file = next((f for f in torrent_files if f.name.lower().endswith('.rar')), None)
+            if main_rar_file:
+                rar_file_path = save_path / main_rar_file.name
+                command = ['unrar', 'x', '-o+', str(rar_file_path), str(temp_extract_path)]
+                result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', errors='ignore')
+                if result.returncode != 0:
+                    raise Exception(f"Unrar failed for {rar_file_path}: {result.stdout} {result.stderr}")
+                import_source = temp_extract_path
+        
+        os.makedirs(dest_addon_path, exist_ok=True)
+        shutil.copytree(import_source, dest_addon_path, dirs_exist_ok=True)
+        current_app.logger.info(f"    -> Addon files imported to '{dest_addon_path}'.")
+
+        # --- THIS IS THE NEW NFO LOGIC FOR ADDONS ---
+        nfo_file = next((f for f in torrent_files if f.name.lower().endswith('.nfo')), None)
+        if nfo_file:
+            source_nfo_path = save_path / nfo_file.name
+            dest_nfo_path = dest_addon_path / os.path.basename(nfo_file.name)
+            try:
+                shutil.copy2(source_nfo_path, dest_nfo_path)
+                current_app.logger.info(f"    -> NFO file copied to addon destination.")
+            except Exception as e:
+                current_app.logger.warning(f"    -> Could not copy addon NFO file: {e}")
+        # --- END OF NFO LOGIC ---
+
+        if temp_extract_path.exists():
+            shutil.rmtree(temp_extract_path)
+
+        # --- REUSE THE EXACT SAME CLEANUP LOGIC ---
+        should_delete = False
+        if import_mode == 'Copy' and goals_met:
+            should_delete = True
+        elif import_mode == 'Move':
+            should_delete = True
+        else:
+            qbit_client.torrents_resume(torrent_hashes=torrent_info.hash)
+        
+        if should_delete:
+            qbit_client.torrents_delete(delete_files=True, torrent_hashes=torrent_info.hash)
+            addon.torrent_hash = None
+
+        # --- Update Database with Final Status ---
+        addon.status = 'Imported' # Changed from 'Installed'
+        db.session.commit()
+        current_app.logger.info(f"Importer: SUCCESS! Addon '{addon.release_name}' has been imported.") # Changed from 'installed'
+
+    except Exception as e:
+        current_app.logger.error(f"Importer: A failure occurred while processing addon '{addon.release_name}': {e}")
+        addon.status = 'Downloaded'
+        db.session.commit()
+        if qbit_client:
+            qbit_client.torrents_resume(torrent_hashes=addon.torrent_hash)
+        raise e
 
 def _clean_release_name(release_name):
     """

@@ -20,7 +20,12 @@ The project is built with Flask and SQLite on the backend and uses a clean, func
     *   **Tier 3:** Performs a deep search of Reddit's history for older releases.
 *   **Download Client Integration:** Sends found releases to qBittorrent via its Web API and monitors download progress.
 *   **Library Management:** Includes features to import existing game libraries and discover new games from curated lists.
-*   **Modern UI:** A clean, responsive interface with a card-based layout for easy browsing.
+*   **Automation Engine:**  Add a game to be monitored, and Gamerr will automatically find a release, send it to your download client, and track its progress.
+*   **Post-Processing:** Gamerr's importer automatically handles completed downloads:
+    *   **Smart File Handling:** Intelligently detects and extracts .rar'd scene releases.
+    *   **Flexible Import Modes:** Choose between Copy Mode (unrar/move instantly while you seed) or Move Mode (wait for seeding goals to save space).
+    *   **Seeding Goal Management:** Respects your seeding time and ratio requirements before removing torrents.
+    *   **NFO Preservation:** Automatically finds and copies .nfo files to your library.
 
 ## Getting Started
 
@@ -108,19 +113,21 @@ This project is actively being developed. The current roadmap includes:
 -   [x] Core refactor from a single file to a structured Flask application.
 -   [x] Feature: Import existing games from a folder structure.
 -   [x] Feature: Discover new and popular games from within the app.
--   [ ] **Settings Page Overhaul:**
+-   [x] **Settings Page Overhaul:**
     -   [x] Add collapsible sections for better organization.
-    -   [ ] Implement dynamic CRUD (Create, Read, Update, Delete) for Jackett indexers.
-    -   [ ] Redact secrets (passwords, API keys) in the UI.
-    -   [ ] Add robust input validation using Flask-WTF.
--   [ ] **Advanced Release Management:**
+    -   [x] Implement dynamic CRUD (Create, Read, Update, Delete) for Jackett indexers.
+    -   [x] Redact secrets (passwords, API keys) in the UI.
+    -   [x] Add robust input validation using Flask-WTF.
+-   [x] **Advanced Release Management:**
     -   [x] "Related Releases" engine to track and manage updates, patches, and DLCs.
-    -   [ ] "Alternative Base Game Releases"
-    -   [ ] "Upscale" feature to find better-quality releases for already-imported games.
+    -   [x] "Alternative Base Game Releases"
+-   [ ] Failed Download Handling.
+-   [ ] Hardlinking support
+-   [ ] UI overhaul. Currently very basic.
+-   [ ] Notifications.
 
 ### Limitations
 
 *   **qBittorrent Only:** Currently, qBittorrent is the only supported download client.
 *   **Jackett Only:** Currently, it only works by configuring indexers from Jackett.
-*   **Release Parsing:** The release name parsing is robust but may not correctly identify every possible format.
 *   **Windows Development:** Running in the Flask development server on Windows can cause some non-critical logging errors due to file locking. The Docker container on Linux does not have this issue.
